@@ -7,6 +7,7 @@
 new Env('夸克自动追更');
 0 8,18,20 * * * quark_auto_save.py
 """
+import logging
 import os
 import re
 import sys
@@ -16,19 +17,23 @@ import random
 import requests
 from datetime import datetime
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s][%(levelname)s] %(message)s",
+    datefmt="%m-%d %H:%M:%S",
+)
+
 # 兼容青龙
 try:
     from treelib import Tree
 except:
-    print("正在尝试自动安装依赖...")
+    logging.info("正在尝试自动安装依赖...")
     os.system("pip3 install treelib &> /dev/null")
     from treelib import Tree
-
 
 CONFIG_DATA = {}
 NOTIFYS = []
 GH_PROXY = os.environ.get("GH_PROXY", "https://ghproxy.net/")
-
 
 MAGIC_REGEX = {
     "$TV": {
@@ -61,14 +66,14 @@ def send_ql_notify(title, body):
         notify.send(title, body)
     except Exception as e:
         if e:
-            print("发送通知消息失败！")
+            logging.info("发送通知消息失败！")
 
 
 # 添加消息
 def add_notify(text):
     global NOTIFYS
     NOTIFYS.append(text)
-    print("📢", text)
+    logging.info(f"📢{text}")
     return text
 
 
@@ -273,7 +278,7 @@ class Quark:
                 fids += response["data"]
                 file_paths = file_paths[50:]
             else:
-                print(f"获取目录ID：失败, {response['message']}")
+                logging.info(f"获取目录ID：失败, {response['message']}")
                 break
             if len(file_paths) == 0:
                 break
@@ -402,10 +407,10 @@ class Quark:
             re.sub(r"/{2,}", "/", f"/{item['savepath']}")
             for item in tasklist
             if not item.get("enddate")
-            or (
-                datetime.now().date()
-                <= datetime.strptime(item["enddate"], "%Y-%m-%d").date()
-            )
+               or (
+                       datetime.now().date()
+                       <= datetime.strptime(item["enddate"], "%Y-%m-%d").date()
+               )
         ]
         if not dir_paths:
             return False
@@ -420,66 +425,23 @@ class Quark:
                 dir_paths_exist_arr.append(
                     {"file_path": dir_path, "fid": new_dir["fid"]}
                 )
-                print(f"创建文件夹：{dir_path}")
+                logging.info(f"创建文件夹：{dir_path}")
             else:
-                print(f"创建文件夹：{dir_path} 失败, {mkdir_return['message']}")
+                logging.info(f"创建文件夹：{dir_path} 失败, {mkdir_return['message']}")
         # 储存目标目录的fid
         for dir_path in dir_paths_exist_arr:
             self.savepath_fid[dir_path["file_path"]] = dir_path["fid"]
-        # print(dir_paths_exist_arr)
-
-    def do_save_check(self, shareurl, savepath):
-        try:
-            pwd_id, pdir_fid = self.get_id_from_url(shareurl)
-            is_sharing, stoken = self.get_stoken(pwd_id)
-            share_file_list = self.get_detail(pwd_id, stoken, pdir_fid)
-            fid_list = [item["fid"] for item in share_file_list]
-            fid_token_list = [item["share_fid_token"] for item in share_file_list]
-            file_name_list = [item["file_name"] for item in share_file_list]
-            if not fid_list:
-                return
-            get_fids = self.get_fids([savepath])
-            to_pdir_fid = (
-                get_fids[0]["fid"] if get_fids else self.mkdir(savepath)["data"]["fid"]
-            )
-            save_file = self.save_file(
-                fid_list, fid_token_list, to_pdir_fid, pwd_id, stoken
-            )
-            if save_file["code"] == 41017:
-                return
-            elif save_file["code"] == 0:
-                dir_file_list = self.ls_dir(to_pdir_fid)
-                del_list = [
-                    item["fid"]
-                    for item in dir_file_list
-                    if (item["file_name"] in file_name_list)
-                    and ((datetime.now().timestamp() - item["created_at"]) < 60)
-                ]
-                if del_list:
-                    self.delete(del_list)
-                    recycle_list = self.recycle_list()
-                    record_id_list = [
-                        item["record_id"]
-                        for item in recycle_list
-                        if item["fid"] in del_list
-                    ]
-                    self.recycle_remove(record_id_list)
-                return save_file
-            else:
-                return False
-        except Exception as e:
-            if os.environ.get("DEBUG") == True:
-                print(f"转存测试失败: {str(e)}")
+        # logging.info(dir_paths_exist_arr)
 
     def do_save_task(self, task):
         # 判断资源失效记录
         if task.get("shareurl_ban"):
-            print(f"《{task['taskname']}》：{task['shareurl_ban']}")
+            logging.info(f"《{task['taskname']}》：{task['shareurl_ban']}")
             return
 
         # 链接转换所需参数
         pwd_id, pdir_fid = self.get_id_from_url(task["shareurl"])
-        # print("match: ", pwd_id, pdir_fid)
+        # logging.info("match: ", pwd_id, pdir_fid)
 
         # 获取stoken，同时可验证资源是否失效
         is_sharing, stoken = self.get_stoken(pwd_id)
@@ -487,14 +449,14 @@ class Quark:
             add_notify(f"❌《{task['taskname']}》：{stoken}\n")
             task["shareurl_ban"] = stoken
             return
-        # print("stoken: ", stoken)
+        # logging.info("stoken: ", stoken)
 
         updated_tree = self.dir_check_and_save(task, pwd_id, stoken, pdir_fid)
         if updated_tree.size(1) > 0:
             add_notify(f"✅《{task['taskname']}》添加追更：\n{updated_tree}")
             return True
         else:
-            print(f"任务结束：没有新的转存任务")
+            logging.info(f"任务结束：没有新的转存任务")
             return False
 
     def dir_check_and_save(self, task, pwd_id, stoken, pdir_fid="", subdir_path=""):
@@ -502,7 +464,7 @@ class Quark:
         tree.create_node(task["savepath"], pdir_fid)
         # 获取分享文件列表
         share_file_list = self.get_detail(pwd_id, stoken, pdir_fid)
-        # print("share_file_list: ", share_file_list)
+        # logging.info("share_file_list: ", share_file_list)
 
         if not share_file_list:
             if subdir_path == "":
@@ -510,11 +472,11 @@ class Quark:
                 add_notify(f"《{task['taskname']}》：{task['shareurl_ban']}")
             return tree
         elif (
-            len(share_file_list) == 1
-            and share_file_list[0]["dir"]
-            and subdir_path == ""
+                len(share_file_list) == 1
+                and share_file_list[0]["dir"]
+                and subdir_path == ""
         ):  # 仅有一个文件夹
-            print("🧠 该分享是一个文件夹，读取文件夹内列表")
+            logging.info("🧠 该分享是一个文件夹，读取文件夹内列表")
             share_file_list = self.get_detail(pwd_id, stoken, share_file_list[0]["fid"])
 
         # 获取目标目录文件列表
@@ -523,16 +485,17 @@ class Quark:
             if get_fids := self.get_fids([savepath]):
                 self.savepath_fid[savepath] = get_fids[0]["fid"]
             else:
-                print(f"❌ 目录 {savepath} fid获取失败，跳过转存")
+                logging.info(f"❌ 目录 {savepath} fid获取失败，跳过转存")
                 return tree
         to_pdir_fid = self.savepath_fid[savepath]
         dir_file_list = self.ls_dir(to_pdir_fid)
-        # print("dir_file_list: ", dir_file_list)
+        # logging.info("dir_file_list: ", dir_file_list)
 
         # 需保存的文件清单
         need_save_list = []
         # 添加符合的
         for share_file in share_file_list:
+            share_file_fid = share_file['fid']
             if share_file["dir"] and task.get("update_subdir", False):
                 pattern, replace = task["update_subdir"], ""
             else:
@@ -548,12 +511,13 @@ class Quark:
                 # 忽略后缀
                 if task.get("ignore_extension") and not share_file["dir"]:
                     compare_func = lambda a, b1, b2: (
-                        os.path.splitext(a)[0] == os.path.splitext(b1)[0]
-                        or os.path.splitext(a)[0] == os.path.splitext(b2)[0]
+                            os.path.splitext(a)[0] == os.path.splitext(b1)[0]
+                            or os.path.splitext(a)[0] == os.path.splitext(b2)[0]
                     )
                 else:
                     compare_func = lambda a, b1, b2: (a == b1 or a == b2)
                 # 判断目标目录文件是否存在
+                # todo 将share_file_list中需要保存的share_file的fid存储至数据库，通过对比fid确定是否是新增的文件
                 file_exists = any(
                     compare_func(
                         dir_file["file_name"], share_file["file_name"], save_name
@@ -567,7 +531,7 @@ class Quark:
                     # 存在并是一个文件夹
                     if task.get("update_subdir", False):
                         if re.search(task["update_subdir"], share_file["file_name"]):
-                            print(f"检查子文件夹：{savepath}/{share_file['file_name']}")
+                            logging.info(f"检查子文件夹：{savepath}/{share_file['file_name']}")
                             subdir_tree = self.dir_check_and_save(
                                 task,
                                 pwd_id,
@@ -634,17 +598,15 @@ class Quark:
             ).json()
             if response["data"]["status"] != 0:
                 if retry_index > 0:
-                    print()
+                    logging.info('')
                 break
             else:
                 if retry_index == 0:
-                    print(
-                        f"正在等待[{response['data']['task_title']}]执行结果",
-                        end="",
-                        flush=True,
+                    logging.info(
+                        f"正在等待[{response['data']['task_title']}]执行结果"
                     )
                 else:
-                    print(".", end="", flush=True)
+                    logging.info(".")
                 retry_index += 1
                 time.sleep(0.500)
         return response
@@ -671,14 +633,14 @@ class Quark:
                     else dir_file["file_name"]
                 )
                 if save_name != dir_file["file_name"] and (
-                    save_name not in dir_file_name_list
+                        save_name not in dir_file_name_list
                 ):
                     rename_return = self.rename(dir_file["fid"], save_name)
                     if rename_return["code"] == 0:
-                        print(f"重命名：{dir_file['file_name']} → {save_name}")
+                        logging.info(f"重命名：{dir_file['file_name']} → {save_name}")
                         is_rename_count += 1
                     else:
-                        print(
+                        logging.info(
                             f"重命名：{dir_file['file_name']} → {save_name} 失败，{rename_return['message']}"
                         )
         return is_rename_count > 0
@@ -700,12 +662,12 @@ class Emby:
         response = requests.request("GET", url, headers=headers, params=querystring)
         if "application/json" in response.headers["Content-Type"]:
             response = response.json()
-            print(
-                f"Emby媒体库: {response.get('ServerName','')} v{response.get('Version','')}"
+            logging.info(
+                f"Emby媒体库: {response.get('ServerName', '')} v{response.get('Version', '')}"
             )
             return True
         else:
-            print(f"Emby媒体库: 连接失败❌ {response.text}")
+            logging.info(f"Emby媒体库: 连接失败❌ {response.text}")
             return False
 
     def refresh(self, emby_id):
@@ -723,10 +685,10 @@ class Emby:
                 "POST", url, headers=headers, params=querystring
             )
             if response.text == "":
-                print(f"🎞 刷新Emby媒体库：成功✅")
+                logging.info(f"🎞 刷新Emby媒体库：成功✅")
                 return True
             else:
-                print(f"🎞 刷新Emby媒体库：{response.text}❌")
+                logging.info(f"🎞 刷新Emby媒体库：{response.text}❌")
                 return False
 
     def search(self, media_name):
@@ -750,20 +712,20 @@ class Emby:
                 if response.get("Items"):
                     for item in response["Items"]:
                         if item["IsFolder"]:
-                            print(
+                            logging.info(
                                 f"🎞 《{item['Name']}》匹配到Emby媒体库ID：{item['Id']}"
                             )
                             return item["Id"]
             else:
-                print(f"🎞 搜索Emby媒体库：{response.text}❌")
+                logging.info(f"🎞 搜索Emby媒体库：{response.text}❌")
         return False
 
 
 def verify_account(account):
     # 验证账号
-    print(f"▶️ 验证第{account.index}个账号")
+    logging.info(f"▶️ 验证第{account.index}个账号")
     if "__uid" not in account.cookie:
-        print(f"💡 不存在cookie必要参数，判断为仅签到")
+        logging.info(f"💡 不存在cookie必要参数，判断为仅签到")
         return False
     else:
         account_info = account.init()
@@ -771,7 +733,7 @@ def verify_account(account):
             add_notify(f"👤 第{account.index}个账号登录失败，cookie无效❌")
             return False
         else:
-            print(f"👤 账号昵称: {account_info['nickname']}✅")
+            logging.info(f"👤 账号昵称: {account_info['nickname']}✅")
             return True
 
 
@@ -786,33 +748,33 @@ def format_bytes(size_bytes: int) -> str:
 
 def do_sign(account):
     if not account.mparam:
-        print("⏭️ 移动端参数未设置，跳过签到")
-        print()
+        logging.info("⏭️ 移动端参数未设置，跳过签到")
+        logging.info('')
         return
     # 每日领空间
     growth_info = account.get_growth_info()
     if growth_info:
         growth_message = f"💾 {'88VIP' if growth_info['88VIP'] else '普通用户'} 总空间：{format_bytes(growth_info['total_capacity'])}，签到累计获得：{format_bytes(growth_info['cap_composition'].get('sign_reward', 0))}"
         if growth_info["cap_sign"]["sign_daily"]:
-            sign_message = f"📅 签到记录: 今日已签到+{int(growth_info['cap_sign']['sign_daily_reward']/1024/1024)}MB，连签进度({growth_info['cap_sign']['sign_progress']}/{growth_info['cap_sign']['sign_target']})✅"
+            sign_message = f"📅 签到记录: 今日已签到+{int(growth_info['cap_sign']['sign_daily_reward'] / 1024 / 1024)}MB，连签进度({growth_info['cap_sign']['sign_progress']}/{growth_info['cap_sign']['sign_target']})✅"
             message = f"{sign_message}\n{growth_message}"
-            print(message)
+            logging.info(message)
         else:
             sign, sign_return = account.get_growth_sign()
             if sign:
-                sign_message = f"📅 执行签到: 今日签到+{int(sign_return/1024/1024)}MB，连签进度({growth_info['cap_sign']['sign_progress']+1}/{growth_info['cap_sign']['sign_target']})✅"
+                sign_message = f"📅 执行签到: 今日签到+{int(sign_return / 1024 / 1024)}MB，连签进度({growth_info['cap_sign']['sign_progress'] + 1}/{growth_info['cap_sign']['sign_target']})✅"
                 message = f"{sign_message}\n{growth_message}"
                 if (
-                    CONFIG_DATA.get("push_config", {}).get("QUARK_SIGN_NOTIFY") == False
-                    or os.environ.get("QUARK_SIGN_NOTIFY") == "false"
+                        CONFIG_DATA.get("push_config", {}).get("QUARK_SIGN_NOTIFY") == False
+                        or os.environ.get("QUARK_SIGN_NOTIFY") == "false"
                 ):
-                    print(message)
+                    logging.info(message)
                 else:
                     message = message.replace("今日", f"[{account.nickname}]今日")
                     add_notify(message)
             else:
-                print(f"📅 签到异常: {sign_return}")
-    print()
+                logging.info(f"📅 签到异常: {sign_return}")
+    logging.info('')
 
 
 def do_save(account, tasklist=[]):
@@ -820,43 +782,43 @@ def do_save(account, tasklist=[]):
         CONFIG_DATA.get("emby", {}).get("url", ""),
         CONFIG_DATA.get("emby", {}).get("apikey", ""),
     )
-    print(f"转存账号: {account.nickname}")
+    logging.info(f"转存账号: {account.nickname}")
     # 获取全部保存目录fid
     account.update_savepath_fid(tasklist)
 
     def check_date(task):
         return (
-            not task.get("enddate")
-            or (
-                datetime.now().date()
-                <= datetime.strptime(task["enddate"], "%Y-%m-%d").date()
-            )
+                not task.get("enddate")
+                or (
+                        datetime.now().date()
+                        <= datetime.strptime(task["enddate"], "%Y-%m-%d").date()
+                )
         ) and (
-            not task.get("runweek")
-            # 星期一为0，星期日为6
-            or (datetime.today().weekday() + 1 in task.get("runweek"))
+                not task.get("runweek")
+                # 星期一为0，星期日为6
+                or (datetime.today().weekday() + 1 in task.get("runweek"))
         )
 
     # 执行任务
     for index, task in enumerate(tasklist):
         # 判断任务期限
         if check_date(task):
-            print()
-            print(f"#{index+1}------------------")
-            print(f"任务名称: {task['taskname']}")
-            print(f"分享链接: {task['shareurl']}")
-            print(f"目标目录: {task['savepath']}")
-            print(f"正则匹配: {task['pattern']}")
-            print(f"正则替换: {task['replace']}")
+            logging.info('')
+            logging.info(f"#{index + 1}------------------")
+            logging.info(f"任务名称: {task['taskname']}")
+            logging.info(f"分享链接: {task['shareurl']}")
+            logging.info(f"目标目录: {task['savepath']}")
+            logging.info(f"正则匹配: {task['pattern']}")
+            logging.info(f"正则替换: {task['replace']}")
             if task.get("enddate"):
-                print(f"任务截止: {task['enddate']}")
+                logging.info(f"任务截止: {task['enddate']}")
             if task.get("emby_id"):
-                print(f"刷媒体库: {task['emby_id']}")
+                logging.info(f"刷媒体库: {task['emby_id']}")
             if task.get("ignore_extension"):
-                print(f"忽略后缀: {task['ignore_extension']}")
+                logging.info(f"忽略后缀: {task['ignore_extension']}")
             if task.get("update_subdir"):
-                print(f"更子目录: {task['update_subdir']}")
-            print()
+                logging.info(f"更子目录: {task['update_subdir']}")
+            logging.info('')
             is_new = account.do_save_task(task)
             is_rename = account.do_rename_task(task)
             # 刷新媒体库
@@ -868,34 +830,34 @@ def do_save(account, tasklist=[]):
                     if match_emby_id:
                         task["emby_id"] = match_emby_id
                         emby.refresh(match_emby_id)
-    print()
+    logging.info('')
 
 
 def main():
     global CONFIG_DATA
     start_time = datetime.now()
-    print(f"===============程序开始===============")
-    print(f"⏰ 执行时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    print()
+    logging.info(f"===============程序开始===============")
+    logging.info(f"⏰ 执行时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    logging.info('')
     # 读取启动参数
     config_path = sys.argv[1] if len(sys.argv) > 1 else "quark_config.json"
     task_index = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else ""
     # 检查本地文件是否存在，如果不存在就下载
     if not os.path.exists(config_path):
         if os.environ.get("QUARK_COOKIE"):
-            print(
+            logging.info(
                 f"⚙️ 读取到 QUARK_COOKIE 环境变量，仅签到领空间。如需执行转存，请删除该环境变量后配置 {config_path} 文件"
             )
             cookie_val = os.environ.get("QUARK_COOKIE")
             cookie_form_file = False
         else:
-            print(f"⚙️ 配置文件 {config_path} 不存在❌，正远程从下载配置模版")
+            logging.info(f"⚙️ 配置文件 {config_path} 不存在❌，正远程从下载配置模版")
             config_url = f"{GH_PROXY}https://raw.githubusercontent.com/Cp0204/quark_auto_save/main/quark_config.json"
             if download_file(config_url, config_path):
-                print("⚙️ 配置模版下载成功✅，请到程序目录中手动配置")
+                logging.info("⚙️ 配置模版下载成功✅，请到程序目录中手动配置")
             return
     else:
-        print(f"⚙️ 正从 {config_path} 文件中读取配置")
+        logging.info(f"⚙️ 正从 {config_path} 文件中读取配置")
         with open(config_path, "r", encoding="utf-8") as file:
             CONFIG_DATA = json.load(file)
         cookie_val = CONFIG_DATA.get("cookie")
@@ -905,43 +867,43 @@ def main():
     # 获取cookie
     cookies = get_cookies(cookie_val)
     if not cookies:
-        print("❌ cookie 未配置")
+        logging.info("❌ cookie 未配置")
         return
     accounts = [Quark(cookie, index) for index, cookie in enumerate(cookies)]
     # 签到
-    print(f"===============签到任务===============")
+    logging.info(f"===============签到任务===============")
     if type(task_index) is int:
         verify_account(accounts[0])
     else:
         for account in accounts:
             verify_account(account)
             do_sign(account)
-    print()
+    logging.info('')
     # 转存
     if accounts[0].is_active and cookie_form_file:
-        print(f"===============转存任务===============")
+        logging.info(f"===============转存任务===============")
         # 任务列表
         tasklist = CONFIG_DATA.get("tasklist", [])
         if type(task_index) is int:
             do_save(accounts[0], [tasklist[task_index]])
         else:
             do_save(accounts[0], tasklist)
-        print()
+        logging.info('')
     # 通知
     if NOTIFYS:
         notify_body = "\n".join(NOTIFYS)
-        print(f"===============推送通知===============")
+        logging.info(f"===============推送通知===============")
         send_ql_notify("【夸克自动追更】", notify_body)
-        print()
+        logging.info('')
     if cookie_form_file:
         # 更新配置
         with open(config_path, "w", encoding="utf-8") as file:
             json.dump(CONFIG_DATA, file, ensure_ascii=False, indent=2)
 
-    print(f"===============程序结束===============")
+    logging.info(f"===============程序结束===============")
     duration = datetime.now() - start_time
-    print(f"😃 运行时长: {round(duration.total_seconds(), 2)}s")
-    print()
+    logging.info(f"😃 运行时长: {round(duration.total_seconds(), 2)}s")
+    logging.info('')
 
 
 if __name__ == "__main__":
