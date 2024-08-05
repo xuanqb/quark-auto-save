@@ -50,7 +50,21 @@ def magic_regex_func(pattern, replace):
         pattern = CONFIG_DATA["magic_regex"][keyword]["pattern"]
         if replace == "":
             replace = CONFIG_DATA["magic_regex"][keyword]["replace"]
-    return pattern, replace
+    # 正则文件名匹配
+    year = datetime.now().year
+    reg_arr = [
+        {
+            # '2024.06.08-第4期.mp4' to '20240608-第4期.mp4'
+            'pattern': re.compile(r'(\d{4})\.(\d{2})\.(\d{2})'),
+            'repl': r'\1\2\3'
+        },
+        {
+            # '0422春日焕新特辑毛雪汪小屋春日大变样.mp4' to '20240422春日焕新特辑毛雪汪小屋春日大变样.mp4'
+            'pattern': re.compile(r'^(\d{4})(?=\D)'),
+            'repl': fr'{year}\1'
+        }
+    ]
+    return pattern, replace, reg_arr
 
 
 # 发送通知消息
@@ -493,13 +507,14 @@ class Quark:
 
         # 需保存的文件清单
         need_save_list = []
+        reg_arr = []
         # 添加符合的
         for share_file in share_file_list:
             share_file_fid = share_file['fid']
             if share_file["dir"] and task.get("update_subdir", False):
                 pattern, replace = task["update_subdir"], ""
             else:
-                pattern, replace = magic_regex_func(task["pattern"], task["replace"])
+                pattern, replace, reg_arr = magic_regex_func(task["pattern"], task["replace"])
             # 正则文件名匹配
             if re.search(pattern, share_file["file_name"]):
                 # 替换后的文件名
@@ -508,6 +523,10 @@ class Quark:
                     if replace != ""
                     else share_file["file_name"]
                 )
+                for reg in reg_arr:
+                    if re.match(reg['pattern'], share_file["file_name"]):
+                        save_name = re.sub(reg['pattern'], reg['repl'], share_file["file_name"])
+                        break
                 # 忽略后缀
                 if task.get("ignore_extension") and not share_file["dir"]:
                     compare_func = lambda a, b1, b2: (
@@ -612,8 +631,8 @@ class Quark:
         return response
 
     def do_rename_task(self, task, subdir_path=""):
-        pattern, replace = magic_regex_func(task["pattern"], task["replace"])
-        if not pattern or not replace:
+        pattern, replace, reg_arr = magic_regex_func(task["pattern"], task["replace"])
+        if (not pattern or not replace) and not reg_arr:
             return 0
         savepath = re.sub(r"/{2,}", "/", f"/{task['savepath']}{subdir_path}")
         if not self.savepath_fid.get(savepath):
@@ -632,6 +651,10 @@ class Quark:
                     if replace != ""
                     else dir_file["file_name"]
                 )
+                for reg in reg_arr:
+                    if re.match(reg['pattern'], dir_file["file_name"]):
+                        save_name = re.sub(reg['pattern'], reg['repl'], dir_file["file_name"])
+                        break
                 if save_name != dir_file["file_name"] and (
                         save_name not in dir_file_name_list
                 ):
