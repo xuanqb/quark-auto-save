@@ -115,6 +115,14 @@ def get_cookies(cookie_val):
         return False
 
 
+def update_alist(task):
+    alist_leisure_strm_create = task['alist_leisure_strm_create']
+    if not alist_leisure_strm_create:
+        pass
+    alist_leisure_strm_create['refresh_dir'] = 'True'
+    requests.get(url=CONFIG_DATA.get('leisure_strm_create'), params=alist_leisure_strm_create)
+
+
 class Quark:
     def __init__(self, cookie, index=None):
         self.cookie = cookie.strip()
@@ -468,6 +476,8 @@ class Quark:
         updated_tree = self.dir_check_and_save(task, pwd_id, stoken, pdir_fid)
         if updated_tree.size(1) > 0:
             add_notify(f"✅《{task['taskname']}》添加追更：\n{updated_tree}")
+            # 更新alist
+            update_alist(task)
             return True
         else:
             logging.info(f"任务结束：没有新的转存任务")
