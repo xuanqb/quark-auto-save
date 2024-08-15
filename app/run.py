@@ -18,7 +18,12 @@ import subprocess
 import hashlib
 import logging
 import json
+import sys
 import os
+
+parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, parent_dir)
+from quark_auto_save import Quark
 
 
 def get_app_ver():
@@ -193,6 +198,37 @@ def run_script_now():
         stream_with_context(generate_output()),
         content_type="text/event-stream;charset=utf-8",
     )
+
+
+@app.route("/get_share_files")
+def get_share_files():
+    if not is_login():
+        return jsonify({"error": "未登录"})
+    shareurl = request.args.get("shareurl", "")
+    account = Quark("", 0)
+    pwd_id, pdir_fid = account.get_id_from_url(shareurl)
+    _, stoken = account.get_stoken(pwd_id)
+    share_file_list = account.get_detail(pwd_id, stoken, pdir_fid)
+    return jsonify(share_file_list)
+
+
+@app.route("/get_savepath")
+def get_savepath():
+    if not is_login():
+        return jsonify({"error": "未登录"})
+    data = read_json()
+    account = Quark(data["cookie"][0], 0)
+    if path := request.args.get("path"):
+        if path == "/":
+            fid = 0
+        elif get_fids := account.get_fids([path]):
+            fid = get_fids[0]["fid"]
+        else:
+            return jsonify([])
+    else:
+        fid = request.args.get("fid", 0)
+    file_list = account.ls_dir(fid)
+    return jsonify(file_list)
 
 
 # 定时任务执行的函数
