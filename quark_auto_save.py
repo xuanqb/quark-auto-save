@@ -61,6 +61,11 @@ def magic_regex_func(pattern, replace):
             'repl': r'\1\2\3'
         },
         {
+            # '第20240728期喜人奇妙夜.mp4' to '20240728期喜人奇妙夜.mp4'
+            'pattern': re.compile(r'^第((\d{8})([\s\S])*)'),
+            'repl': r'\1'
+        },
+        {
             # '0422春日焕新特辑毛雪汪小屋春日大变样.mp4' to '20240422春日焕新特辑毛雪汪小屋春日大变样.mp4'
             'pattern': re.compile(r'^(\d{4})(?=\D)'),
             'repl': fr'{year}\1'
