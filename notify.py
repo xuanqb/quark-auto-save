@@ -65,6 +65,7 @@ push_config = {
     'IGOT_PUSH_KEY': '',                # iGot 聚合推送的 IGOT_PUSH_KEY
 
     'PUSH_KEY': '',                     # server 酱的 PUSH_KEY，兼容旧版与 Turbo 版
+    'IYUU_TOKEN': '',                   # iyuu的token
 
     'DEER_KEY': '',                     # PushDeer 的 PUSHDEER_KEY
     'DEER_URL': '',                     # PushDeer 的 PUSHDEER_URL
@@ -309,6 +310,23 @@ def serverJ(title: str, content: str) -> None:
     else:
         print(f'serverJ 推送失败！错误码：{response["message"]}')
 
+def iyuu(text: str, desp: str) -> None:
+    """
+    通过 iyuu 推送消息。
+    """
+    if not push_config.get("IYUU_TOKEN"):
+        print("iyuu 服务的 IYUU_TOKEN 未设置!!\n取消推送")
+        return
+    print("iyuu 服务启动")
+
+    data = {"text": text, "desp": desp.replace("\n", "\n\n")}
+    url = f'https://iyuu.cn/{push_config.get("IYUU_TOKEN")}.send'
+    response = requests.post(url, data=data).json()
+
+    if response.get("errcode") == 0:
+        print("iyuu 推送成功！")
+    else:
+        print(f'iyuu 推送失败！错误码：{response["errmsg"]}')
 
 def pushdeer(title: str, content: str) -> None:
     """
@@ -895,6 +913,8 @@ def add_notify_function():
         notify_function.append(iGot)
     if push_config.get("PUSH_KEY"):
         notify_function.append(serverJ)
+    if push_config.get("IYUU_TOKEN"):
+        notify_function.append(iyuu)
     if push_config.get("DEER_KEY"):
         notify_function.append(pushdeer)
     if push_config.get("CHAT_URL") and push_config.get("CHAT_TOKEN"):

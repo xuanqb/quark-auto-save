@@ -14,6 +14,8 @@ import sys
 import json
 import time
 import random
+from json import JSONDecodeError
+
 import requests
 from datetime import datetime
 
@@ -116,10 +118,23 @@ def get_cookies(cookie_val):
 
 
 def update_alist(task):
-    alist_leisure_strm_create = task['alist_leisure_strm_create']
+    try:
+        alist_leisure_strm_create = json.loads(task['alist_leisure_strm_create'])
+    except JSONDecodeError as error:
+        return
     if not alist_leisure_strm_create:
         pass
-    alist_leisure_strm_create['refresh_dir'] = 'True'
+    if 'preserve_parent_directory' not in alist_leisure_strm_create:
+        alist_leisure_strm_create['preserve_parent_directory'] = 'False'
+    if 'refresh_dir' not in alist_leisure_strm_create:
+        alist_leisure_strm_create['refresh_dir'] = 'True'
+    if 'series_name' not in alist_leisure_strm_create:
+        alist_leisure_strm_create['series_name'] = task['taskname']
+    if 'season_num' not in alist_leisure_strm_create:
+        alist_leisure_strm_create['season_num'] = '2'
+    if 'url' not in alist_leisure_strm_create:
+        alist_leisure_strm_create['url'] = '/quark' + task['savepath']
+
     requests.get(url=CONFIG_DATA.get('leisure_strm_create'), params=alist_leisure_strm_create)
 
 
@@ -476,8 +491,6 @@ class Quark:
         updated_tree = self.dir_check_and_save(task, pwd_id, stoken, pdir_fid)
         if updated_tree.size(1) > 0:
             add_notify(f"✅《{task['taskname']}》添加追更：\n{updated_tree}")
-            # 更新alist
-            update_alist(task)
             return True
         else:
             logging.info(f"任务结束：没有新的转存任务")
@@ -866,6 +879,10 @@ def do_save(account, tasklist=[]):
                     if match_emby_id:
                         task["emby_id"] = match_emby_id
                         emby.refresh(match_emby_id)
+            # 刷新alist
+            if is_new or is_rename:
+                update_alist(task)
+
     logging.info('')
 
 
