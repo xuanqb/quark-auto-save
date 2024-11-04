@@ -46,6 +46,7 @@ DEBUG = os.environ.get("DEBUG", False)
 app = Flask(__name__)
 app.config["APP_VERSION"] = get_app_ver()
 app.secret_key = "ca943f6db6dd34823d36ab08d8d6f65d"
+app.config["SESSION_COOKIE_NAME"] = "QUARK_AUTO_SAVE_SESSION"
 app.json.ensure_ascii = False
 app.json.sort_keys = False
 app.jinja_env.variable_start_string = "[["
@@ -200,16 +201,18 @@ def run_script_now():
     )
 
 
-@app.route("/get_share_files")
+@app.route("/get_share_detail")
 def get_share_files():
     if not is_login():
         return jsonify({"error": "未登录"})
     shareurl = request.args.get("shareurl", "")
     account = Quark("", 0)
     pwd_id, pdir_fid = account.get_id_from_url(shareurl)
-    _, stoken = account.get_stoken(pwd_id)
-    share_file_list = account.get_detail(pwd_id, stoken, pdir_fid)
-    return jsonify(share_file_list)
+    is_sharing, stoken = account.get_stoken(pwd_id)
+    if not is_sharing:
+        return jsonify({"error": stoken})
+    share_detail = account.get_detail(pwd_id, stoken, pdir_fid, 1)
+    return jsonify(share_detail)
 
 
 @app.route("/get_savepath")

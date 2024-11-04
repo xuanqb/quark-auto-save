@@ -46,12 +46,14 @@ MAGIC_REGEX = {
 
 
 # 魔法正则匹配
-def magic_regex_func(pattern, replace):
+def magic_regex_func(pattern, replace, taskname=""):
     keyword = pattern
     if keyword in CONFIG_DATA["magic_regex"]:
         pattern = CONFIG_DATA["magic_regex"][keyword]["pattern"]
         if replace == "":
             replace = CONFIG_DATA["magic_regex"][keyword]["replace"]
+    if taskname:
+        replace = replace.replace("$TASKNAME", taskname)
     # 正则文件名匹配
     year = datetime.now().year
     reg_arr = [
@@ -149,13 +151,8 @@ class Quark:
         self.index = index + 1
         self.is_active = False
         self.nickname = ""
-        self.st = self.match_st_form_cookie(cookie)
         self.mparam = self.match_mparam_form_cookie(cookie)
         self.savepath_fid = {"/": "0"}
-
-    def match_st_form_cookie(self, cookie):
-        match = re.search(r"=(st[a-zA-Z0-9]+);", cookie)
-        return match.group(1) if match else False
 
     def match_mparam_form_cookie(self, cookie):
         mparam = {}
@@ -175,8 +172,6 @@ class Quark:
             "cookie": self.cookie,
             "content-type": "application/json",
         }
-        if self.st:
-            headers["x-clouddrive-st"] = self.st
         return headers
 
     def init(self):
@@ -204,7 +199,7 @@ class Quark:
             return False
 
     def get_growth_info(self):
-        url = "https://drive-m.quark.cn/1/clouddrive/capacity/growth/info"
+        url = "https://drive-h.quark.cn/1/clouddrive/capacity/growth/info"
         querystring = {
             "pr": "ucpro",
             "fr": "android",
@@ -224,7 +219,7 @@ class Quark:
             return False
 
     def get_growth_sign(self):
-        url = "https://drive-m.quark.cn/1/clouddrive/capacity/growth/sign"
+        url = "https://drive-h.quark.cn/1/clouddrive/capacity/growth/sign"
         querystring = {
             "pr": "ucpro",
             "fr": "android",
@@ -262,7 +257,7 @@ class Quark:
 
     # 可验证资源是否失效
     def get_stoken(self, pwd_id):
-        url = "https://drive-m.quark.cn/1/clouddrive/share/sharepage/token"
+        url = "https://drive-h.quark.cn/1/clouddrive/share/sharepage/token"
         querystring = {"pr": "ucpro", "fr": "h5"}
         payload = {"pwd_id": pwd_id, "passcode": ""}
         headers = self.common_headers()
@@ -274,11 +269,11 @@ class Quark:
         else:
             return False, response["message"]
 
-    def get_detail(self, pwd_id, stoken, pdir_fid):
-        file_list = []
+    def get_detail(self, pwd_id, stoken, pdir_fid, _fetch_share=0):
+        list_merge = []
         page = 1
         while True:
-            url = "https://drive-m.quark.cn/1/clouddrive/share/sharepage/detail"
+            url = "https://drive-h.quark.cn/1/clouddrive/share/sharepage/detail"
             querystring = {
                 "pr": "ucpro",
                 "fr": "pc",
@@ -289,7 +284,7 @@ class Quark:
                 "_page": page,
                 "_size": "50",
                 "_fetch_banner": "0",
-                "_fetch_share": "0",
+                "_fetch_share": _fetch_share,
                 "_fetch_total": "1",
                 "_sort": "file_type:asc,updated_at:desc",
             }
@@ -298,18 +293,19 @@ class Quark:
                 "GET", url, headers=headers, params=querystring
             ).json()
             if response["data"]["list"]:
-                file_list += response["data"]["list"]
+                list_merge += response["data"]["list"]
                 page += 1
             else:
                 break
-            if len(file_list) >= response["metadata"]["_total"]:
+            if len(list_merge) >= response["metadata"]["_total"]:
                 break
-        return file_list
+        response["data"]["list"] = list_merge
+        return response["data"]
 
     def get_fids(self, file_paths):
         fids = []
         while True:
-            url = "https://drive-m.quark.cn/1/clouddrive/file/info/path_list"
+            url = "https://drive-h.quark.cn/1/clouddrive/file/info/path_list"
             querystring = {"pr": "ucpro", "fr": "pc"}
             payload = {"file_path": file_paths[:50], "namespace": "0"}
             headers = self.common_headers()
@@ -330,7 +326,7 @@ class Quark:
         file_list = []
         page = 1
         while True:
-            url = "https://drive-m.quark.cn/1/clouddrive/file/sort"
+            url = "https://drive-h.quark.cn/1/clouddrive/file/sort"
             querystring = {
                 "pr": "ucpro",
                 "fr": "pc",
@@ -356,7 +352,7 @@ class Quark:
         return file_list
 
     def save_file(self, fid_list, fid_token_list, to_pdir_fid, pwd_id, stoken):
-        url = "https://drive-m.quark.cn/1/clouddrive/share/sharepage/save"
+        url = "https://drive-h.quark.cn/1/clouddrive/share/sharepage/save"
         querystring = {
             "pr": "ucpro",
             "fr": "pc",
@@ -365,7 +361,6 @@ class Quark:
             "__dt": int(random.uniform(1, 5) * 60 * 1000),
             "__t": datetime.now().timestamp(),
         }
-        querystring["fr"] = "h5" if self.st else "pc"
         payload = {
             "fid_list": fid_list,
             "fid_token_list": fid_token_list,
@@ -382,7 +377,7 @@ class Quark:
         return response
 
     def mkdir(self, dir_path):
-        url = "https://drive-m.quark.cn/1/clouddrive/file"
+        url = "https://drive-h.quark.cn/1/clouddrive/file"
         querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
         payload = {
             "pdir_fid": "0",
@@ -397,7 +392,7 @@ class Quark:
         return response
 
     def rename(self, fid, file_name):
-        url = "https://drive-m.quark.cn/1/clouddrive/file/rename"
+        url = "https://drive-h.quark.cn/1/clouddrive/file/rename"
         querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
         payload = {"fid": fid, "file_name": file_name}
         headers = self.common_headers()
@@ -407,7 +402,7 @@ class Quark:
         return response
 
     def delete(self, filelist):
-        url = "https://drive-m.quark.cn/1/clouddrive/file/delete"
+        url = "https://drive-h.quark.cn/1/clouddrive/file/delete"
         querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
         payload = {"action_type": 2, "filelist": filelist, "exclude_fids": []}
         headers = self.common_headers()
@@ -417,7 +412,7 @@ class Quark:
         return response
 
     def recycle_list(self, page=1, size=30):
-        url = "https://drive-m.quark.cn/1/clouddrive/file/recycle/list"
+        url = "https://drive-h.quark.cn/1/clouddrive/file/recycle/list"
         querystring = {
             "_page": page,
             "_size": size,
@@ -432,7 +427,7 @@ class Quark:
         return response["data"]["list"]
 
     def recycle_remove(self, record_list):
-        url = "https://drive-m.quark.cn/1/clouddrive/file/recycle/remove"
+        url = "https://drive-h.quark.cn/1/clouddrive/file/recycle/remove"
         querystring = {"uc_param_str": "", "fr": "pc", "pr": "ucpro"}
         payload = {
             "select_mode": 2,
@@ -473,7 +468,50 @@ class Quark:
         # 储存目标目录的fid
         for dir_path in dir_paths_exist_arr:
             self.savepath_fid[dir_path["file_path"]] = dir_path["fid"]
-        # logging.info(dir_paths_exist_arr)
+        # print(dir_paths_exist_arr)
+
+    def do_save_check(self, shareurl, savepath):
+        try:
+            pwd_id, pdir_fid = self.get_id_from_url(shareurl)
+            is_sharing, stoken = self.get_stoken(pwd_id)
+            share_file_list = self.get_detail(pwd_id, stoken, pdir_fid)["list"]
+            fid_list = [item["fid"] for item in share_file_list]
+            fid_token_list = [item["share_fid_token"] for item in share_file_list]
+            file_name_list = [item["file_name"] for item in share_file_list]
+            if not fid_list:
+                return
+            get_fids = self.get_fids([savepath])
+            to_pdir_fid = (
+                get_fids[0]["fid"] if get_fids else self.mkdir(savepath)["data"]["fid"]
+            )
+            save_file = self.save_file(
+                fid_list, fid_token_list, to_pdir_fid, pwd_id, stoken
+            )
+            if save_file["code"] == 41017:
+                return
+            elif save_file["code"] == 0:
+                dir_file_list = self.ls_dir(to_pdir_fid)
+                del_list = [
+                    item["fid"]
+                    for item in dir_file_list
+                    if (item["file_name"] in file_name_list)
+                    and ((datetime.now().timestamp() - item["created_at"]) < 60)
+                ]
+                if del_list:
+                    self.delete(del_list)
+                    recycle_list = self.recycle_list()
+                    record_id_list = [
+                        item["record_id"]
+                        for item in recycle_list
+                        if item["fid"] in del_list
+                    ]
+                    self.recycle_remove(record_id_list)
+                return save_file
+            else:
+                return False
+        except Exception as e:
+            if os.environ.get("DEBUG") == True:
+                logging.info(f"转存测试失败: {str(e)}")
 
     def do_save_task(self, task):
         # 判断资源失效记录
@@ -505,7 +543,7 @@ class Quark:
         tree = Tree()
         tree.create_node(task["savepath"], pdir_fid)
         # 获取分享文件列表
-        share_file_list = self.get_detail(pwd_id, stoken, pdir_fid)
+        share_file_list = self.get_detail(pwd_id, stoken, pdir_fid)["list"]
         # logging.info("share_file_list: ", share_file_list)
 
         if not share_file_list:
@@ -519,7 +557,9 @@ class Quark:
                 and subdir_path == ""
         ):  # 仅有一个文件夹
             logging.info("🧠 该分享是一个文件夹，读取文件夹内列表")
-            share_file_list = self.get_detail(pwd_id, stoken, share_file_list[0]["fid"])
+            share_file_list = self.get_detail(
+                pwd_id, stoken, share_file_list[0]["fid"]
+            )["list"]
 
         # 获取目标目录文件列表
         savepath = re.sub(r"/{2,}", "/", f"/{task['savepath']}{subdir_path}")
@@ -542,7 +582,9 @@ class Quark:
             if share_file["dir"] and task.get("update_subdir", False):
                 pattern, replace = task["update_subdir"], ""
             else:
-                pattern, replace, reg_arr = magic_regex_func(task["pattern"], task["replace"])
+                pattern, replace, reg_arr = magic_regex_func(
+                    task["pattern"], task["replace"], task["taskname"]
+                )
             # 正则文件名匹配
             if re.search(pattern, share_file["file_name"]):
                 # 替换后的文件名
@@ -632,7 +674,7 @@ class Quark:
     def query_task(self, task_id):
         retry_index = 0
         while True:
-            url = "https://drive-m.quark.cn/1/clouddrive/task"
+            url = "https://drive-h.quark.cn/1/clouddrive/task"
             querystring = {
                 "pr": "ucpro",
                 "fr": "pc",
@@ -662,7 +704,9 @@ class Quark:
         return response
 
     def do_rename_task(self, task, subdir_path=""):
-        pattern, replace, reg_arr = magic_regex_func(task["pattern"], task["replace"])
+        pattern, replace, reg_arr = magic_regex_func(
+            task["pattern"], task["replace"], task["taskname"]
+        )
         if (not pattern or not replace) and not reg_arr:
             return 0
         savepath = re.sub(r"/{2,}", "/", f"/{task['savepath']}{subdir_path}")
