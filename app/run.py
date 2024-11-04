@@ -111,7 +111,7 @@ def login():
         password = data["webui"]["password"]
         # 验证用户名和密码
         if (username == request.form.get("username")) and (
-            password == request.form.get("password")
+                password == request.form.get("password")
         ):
             logging.info(f">>> 用户 {username} 登录成功")
             session["login"] = gen_md5(username + password)
@@ -175,7 +175,7 @@ def run_script_now():
     task_index = request.args.get("task_index", "")
     command = [PYTHON_PATH, "-u", SCRIPT_PATH, CONFIG_PATH, task_index]
     logging.info(
-        f">>> 手动运行任务{int(task_index)+1 if task_index.isdigit() else 'all'}"
+        f">>> 手动运行任务{int(task_index) + 1 if task_index.isdigit() else 'all'}"
     )
 
     def generate_output():
