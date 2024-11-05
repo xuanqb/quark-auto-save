@@ -133,12 +133,16 @@ def update_alist(task):
         pass
     if 'preserve_parent_directory' not in alist_leisure_strm_create:
         alist_leisure_strm_create['preserve_parent_directory'] = 'False'
+    if 'keep_original_file_name' not in alist_leisure_strm_create:
+        alist_leisure_strm_create['keep_original_file_name'] = 'False'
     if 'refresh_dir' not in alist_leisure_strm_create:
         alist_leisure_strm_create['refresh_dir'] = 'True'
     if 'series_name' not in alist_leisure_strm_create:
         alist_leisure_strm_create['series_name'] = task['taskname']
     if 'season_num' not in alist_leisure_strm_create:
         alist_leisure_strm_create['season_num'] = '2'
+    if 'create_nfo' not in alist_leisure_strm_create:
+        alist_leisure_strm_create['create_nfo'] = 'True'
     if 'url' not in alist_leisure_strm_create:
         alist_leisure_strm_create['url'] = '/quark' + task['savepath']
 
