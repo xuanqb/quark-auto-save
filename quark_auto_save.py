@@ -692,6 +692,7 @@ def load_media_servers(media_servers_config, media_servers_dir="media_servers"):
     available_modules = [
         f.replace(".py", "") for f in os.listdir(media_servers_dir) if f.endswith(".py")
     ]
+    print(f"🧩 载入媒体库模块")
     for module_name in available_modules:
         try:
             module = importlib.import_module(f"{media_servers_dir}.{module_name}")
@@ -703,7 +704,8 @@ def load_media_servers(media_servers_config, media_servers_dir="media_servers"):
             else:
                 media_servers_config[module_name] = ServerClass().default_config
         except (ImportError, AttributeError):
-            print(f"加载模块 {module_name} 失败")
+            print(f"载入模块 {module_name} 失败")
+    print()
     return media_servers
 
 
@@ -795,8 +797,8 @@ def do_save(account, tasklist=[]):
             print(f"正则替换: {task['replace']}")
             if task.get("enddate"):
                 print(f"任务截止: {task['enddate']}")
-            if task.get("emby_id"):
-                print(f"刷媒体库: {task['emby_id']}")
+            if task.get("media_id"):
+                print(f"刷媒体库: {task['media_id']}")
             if task.get("ignore_extension"):
                 print(f"忽略后缀: {task['ignore_extension']}")
             if task.get("update_subdir"):
@@ -804,20 +806,12 @@ def do_save(account, tasklist=[]):
             print()
             is_new = account.do_save_task(task)
             is_rename = account.do_rename_task(task)
-            # 刷新媒体库
-            for server_name, media_server in media_servers.items():
-                if (
-                    media_server.is_active
-                    and (is_new or is_rename)
-                    and task.get("media_id") != "0"
-                ):
-                    if task.get("media_id"):
-                        media_server.refresh(task["media_id"])
-                    else:
-                        match_media_id = media_server.search(task["taskname"])
-                        if match_media_id:
-                            task["media_id"] = match_media_id
-                            media_server.refresh(match_media_id)
+            # 调用媒体库模块
+            if is_new or is_rename:
+                print(f"🧩 调用媒体库模块")
+                for server_name, media_server in media_servers.items():
+                    if media_server.is_active:
+                        task = media_server.run(task) or task
     print()
 
 
@@ -825,11 +819,15 @@ def reaking_change_update():
     global CONFIG_DATA
     # print("Update config v0.3.6.1 to 0.3.7")
     if CONFIG_DATA.get("emby"):
-        CONFIG_DATA.setdefault("media_servers", {})["emby"] = CONFIG_DATA["emby"]
+        CONFIG_DATA.setdefault("media_servers", {})["emby"] = {
+            "url": CONFIG_DATA["emby"]["url"],
+            "token": CONFIG_DATA["emby"]["apikey"],
+        }
         del CONFIG_DATA["emby"]
         for task in CONFIG_DATA.get("tasklist", {}):
             task["media_id"] = task.get("emby_id", "")
-            del task["emby_id"]
+            if task.get("emby_id"):
+                del task["emby_id"]
 
 
 def main():
