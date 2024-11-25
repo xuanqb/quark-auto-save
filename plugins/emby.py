@@ -3,30 +3,38 @@ import requests
 
 class Emby:
 
-    default_config = {"url": "", "token": ""}
+    default_config = {
+        "url": "",  # Emby服务器地址
+        "token": "",  # Emby服务器token
+    }
+    default_task_config = {
+        "try_match": True,  # 是否尝试匹配
+        "media_id": "",  # 媒体ID，当为0时不刷新
+    }
     is_active = False
 
     def __init__(self, **kwargs):
+        self.plugin_name = self.__class__.__name__.lower()
         if kwargs:
-            for key, value in self.default_config.items():
+            for key, _ in self.default_config.items():
                 if key in kwargs:
                     setattr(self, key, kwargs[key])
                 else:
-                    print(f"{self.__class__.__name__} 模块缺少必要参数: {key}")
+                    print(f"{self.plugin_name} 模块缺少必要参数: {key}")
             if self.url and self.token:
                 if self.get_info():
                     self.is_active = True
 
-    def run(self, task):
-        if task.get("media_id"):
-            if task["media_id"] != "0":
-                self.refresh(task["media_id"])
-        else:
-            match_media_id = self.search(task["taskname"])
-            if match_media_id:
-                task["media_id"] = match_media_id
-                self.refresh(match_media_id)
-        return task
+    def run(self, task, **kwargs):
+        if task_config := task.get("addition", {}).get(self.plugin_name, {}):
+            if media_id := task_config.get("media_id"):
+                if media_id != "0":
+                    self.refresh(media_id)
+            elif task_config.get("try_match"):
+                if match_media_id := self.search(task["taskname"]):
+                    self.refresh(match_media_id)
+                    task["addition"][self.plugin_name]["media_id"] = match_media_id
+                    return task
 
     def get_info(self):
         url = f"{self.url}/emby/System/Info"

@@ -125,6 +125,7 @@ class Quark:
         headers = {
             "cookie": self.cookie,
             "content-type": "application/json",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/3.14.2 Chrome/112.0.5615.165 Electron/24.1.3.8 Safari/537.36 Channel/pckk_other_ch",
         }
         return headers
 
@@ -329,6 +330,16 @@ class Quark:
         ).json()
         return response
 
+    def download(self, fids):
+        url = "https://drive-h.quark.cn/1/clouddrive/file/download"
+        querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
+        payload = {"fids": fids}
+        headers = self.common_headers()
+        response = requests.post(url, json=payload, headers=headers, params=querystring)
+        set_cookie = response.cookies.get_dict()
+        cookie_str = "; ".join([f"{key}={value}" for key, value in set_cookie.items()])
+        return response.json(), cookie_str
+
     def mkdir(self, dir_path):
         url = "https://drive-h.quark.cn/1/clouddrive/file"
         querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
@@ -487,14 +498,13 @@ class Quark:
         updated_tree = self.dir_check_and_save(task, pwd_id, stoken, pdir_fid)
         if updated_tree.size(1) > 0:
             add_notify(f"✅《{task['taskname']}》添加追更：\n{updated_tree}")
-            return True
+            return updated_tree
         else:
             print(f"任务结束：没有新的转存任务")
             return False
 
     def dir_check_and_save(self, task, pwd_id, stoken, pdir_fid="", subdir_path=""):
         tree = Tree()
-        tree.create_node(task["savepath"], pdir_fid)
         # 获取分享文件列表
         share_file_list = self.get_detail(pwd_id, stoken, pdir_fid)["list"]
         # print("share_file_list: ", share_file_list)
@@ -525,6 +535,14 @@ class Quark:
         to_pdir_fid = self.savepath_fid[savepath]
         dir_file_list = self.ls_dir(to_pdir_fid)
         # print("dir_file_list: ", dir_file_list)
+
+        tree.create_node(
+            savepath,
+            pdir_fid,
+            data={
+                "is_dir": True,
+            },
+        )
 
         # 需保存的文件清单
         need_save_list = []
@@ -580,6 +598,9 @@ class Quark:
                                     "📁" + share_file["file_name"],
                                     share_file["fid"],
                                     parent=pdir_fid,
+                                    data={
+                                        "is_dir": share_file["dir"],
+                                    },
                                 )
                                 tree.merge(share_file["fid"], subdir_tree, deep=False)
             # 指定文件开始订阅/到达指定文件（含）结束历遍
@@ -588,7 +609,6 @@ class Quark:
 
         fid_list = [item["fid"] for item in need_save_list]
         fid_token_list = [item["share_fid_token"] for item in need_save_list]
-        save_name_list = [item["save_name"] for item in need_save_list]
         if fid_list:
             save_file_return = self.save_file(
                 fid_list, fid_token_list, to_pdir_fid, pwd_id, stoken
@@ -598,16 +618,22 @@ class Quark:
                 task_id = save_file_return["data"]["task_id"]
                 query_task_return = self.query_task(task_id)
                 if query_task_return["code"] == 0:
-                    save_name_list.sort()
                     # 建立目录树
-                    for item in need_save_list:
+                    for index, item in enumerate(need_save_list):
                         icon = (
                             "📁"
                             if item["dir"] == True
                             else "🎞️" if item["obj_category"] == "video" else ""
                         )
                         tree.create_node(
-                            f"{icon}{item['save_name']}", item["fid"], parent=pdir_fid
+                            f"{icon}{item['save_name']}",
+                            item["fid"],
+                            parent=pdir_fid,
+                            data={
+                                "fid": f"{query_task_return['data']['save_as']['save_as_top_fids'][index]}",
+                                "path": f"{savepath}/{item['save_name']}",
+                                "is_dir": item["dir"],
+                            },
                         )
                 else:
                     err_msg = query_task_return["message"]
@@ -688,13 +714,14 @@ class Quark:
         return is_rename_count > 0
 
 
-def load_media_servers(media_servers_config, media_servers_dir="media_servers"):
-    media_servers = {}
+def load_plugins(plugins_config, plugins_dir="plugins"):
+    plugins_available = {}
+    task_plugins_config = {}
     all_modules = [
-        f.replace(".py", "") for f in os.listdir(media_servers_dir) if f.endswith(".py")
+        f.replace(".py", "") for f in os.listdir(plugins_dir) if f.endswith(".py")
     ]
     # 调整模块优先级
-    priority_path = os.path.join(media_servers_dir, "_priority.json")
+    priority_path = os.path.join(plugins_dir, "_priority.json")
     try:
         with open(priority_path, encoding="utf-8") as f:
             priority_modules = json.load(f)
@@ -704,21 +731,25 @@ def load_media_servers(media_servers_config, media_servers_dir="media_servers"):
             ] + [module for module in all_modules if module not in priority_modules]
     except (FileNotFoundError, json.JSONDecodeError):
         priority_modules = []
-    print(f"🧩 载入媒体库模块")
+    print(f"🧩 载入插件")
     for module_name in all_modules:
         try:
-            module = importlib.import_module(f"{media_servers_dir}.{module_name}")
+            module = importlib.import_module(f"{plugins_dir}.{module_name}")
             ServerClass = getattr(module, module_name.capitalize())
             # 检查配置中是否存在该模块的配置
-            if module_name in media_servers_config:
-                server_config = media_servers_config[module_name]
-                media_servers[module_name] = ServerClass(**server_config)
+            if module_name in plugins_config:
+                plugin = ServerClass(**plugins_config[module_name])
+                plugins_available[module_name] = plugin
             else:
-                media_servers_config[module_name] = ServerClass().default_config
+                plugin = ServerClass()
+                plugins_config[module_name] = plugin.default_config
+            # 检查插件是否支持单独任务配置
+            if hasattr(plugin, "default_task_config"):
+                task_plugins_config[module_name] = plugin.default_task_config
         except (ImportError, AttributeError) as e:
             print(f"载入模块 {module_name} 失败: {e}")
     print()
-    return media_servers
+    return plugins_available, task_plugins_config
 
 
 def verify_account(account):
@@ -778,7 +809,9 @@ def do_sign(account):
 
 
 def do_save(account, tasklist=[]):
-    media_servers = load_media_servers(CONFIG_DATA.get("media_servers", {}))
+    plugins, CONFIG_DATA["task_plugins_config"] = load_plugins(
+        CONFIG_DATA.get("plugins", {})
+    )
     print(f"转存账号: {account.nickname}")
     # 获取全部保存目录fid
     account.update_savepath_fid(tasklist)
@@ -804,33 +837,51 @@ def do_save(account, tasklist=[]):
             print(f"#{index+1}------------------")
             print(f"任务名称: {task['taskname']}")
             print(f"分享链接: {task['shareurl']}")
-            print(f"目标目录: {task['savepath']}")
+            print(f"保存路径: {task['savepath']}")
             print(f"正则匹配: {task['pattern']}")
             print(f"正则替换: {task['replace']}")
             if task.get("enddate"):
                 print(f"任务截止: {task['enddate']}")
-            if task.get("media_id"):
-                print(f"刷媒体库: {task['media_id']}")
             if task.get("ignore_extension"):
                 print(f"忽略后缀: {task['ignore_extension']}")
             if task.get("update_subdir"):
                 print(f"更子目录: {task['update_subdir']}")
             print()
-            is_new = account.do_save_task(task)
+            is_new_tree = account.do_save_task(task)
             is_rename = account.do_rename_task(task)
-            # 调用媒体库模块
-            if is_new or is_rename:
-                print(f"🧩 调用媒体库模块")
-                for server_name, media_server in media_servers.items():
-                    if media_server.is_active:
-                        task = media_server.run(task) or task
+
+            # 补充任务的插件配置
+            def merge_dicts(a, b):
+                result = a.copy()
+                for key, value in b.items():
+                    if (
+                        key in result
+                        and isinstance(result[key], dict)
+                        and isinstance(value, dict)
+                    ):
+                        result[key] = merge_dicts(result[key], value)
+                    elif key not in result:
+                        result[key] = value
+                return result
+
+            task["addition"] = merge_dicts(
+                task.get("addition", {}), CONFIG_DATA["task_plugins_config"]
+            )
+            # 调用插件
+            if is_new_tree or is_rename:
+                print(f"🧩 调用插件")
+                for plugin_name, plugin in plugins.items():
+                    if plugin.is_active and (is_new_tree or is_rename):
+                        task = (
+                            plugin.run(task, account=account, tree=is_new_tree) or task
+                        )
     print()
 
 
-def reaking_change_update():
+def breaking_change_update():
     global CONFIG_DATA
-    # print("Update config v0.3.6.1 to 0.3.7")
     if CONFIG_DATA.get("emby"):
+        print("🔼 Update config v0.3.6.1 to 0.3.7")
         CONFIG_DATA.setdefault("media_servers", {})["emby"] = {
             "url": CONFIG_DATA["emby"]["url"],
             "token": CONFIG_DATA["emby"]["apikey"],
@@ -840,6 +891,18 @@ def reaking_change_update():
             task["media_id"] = task.get("emby_id", "")
             if task.get("emby_id"):
                 del task["emby_id"]
+    if CONFIG_DATA.get("media_servers"):
+        print("🔼 Update config v0.3.8 to 0.3.9")
+        CONFIG_DATA["plugins"] = CONFIG_DATA.get("media_servers")
+        del CONFIG_DATA["media_servers"]
+        for task in CONFIG_DATA.get("tasklist", {}):
+            task["addition"] = {
+                "emby": {
+                    "media_id": task.get("media_id", ""),
+                }
+            }
+            if task.get("media_id"):
+                del task["media_id"]
 
 
 def main():
@@ -869,7 +932,7 @@ def main():
         print(f"⚙️ 正从 {config_path} 文件中读取配置")
         with open(config_path, "r", encoding="utf-8") as file:
             CONFIG_DATA = json.load(file)
-            reaking_change_update()
+            breaking_change_update()
         cookie_val = CONFIG_DATA.get("cookie")
         if not CONFIG_DATA.get("magic_regex"):
             CONFIG_DATA["magic_regex"] = MAGIC_REGEX

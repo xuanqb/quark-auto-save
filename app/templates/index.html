@@ -82,25 +82,25 @@
 
       <div class="row title">
         <div class="col">
-          <h2 style="display: inline-block;">媒体库</h2>
+          <h2 style="display: inline-block;">插件</h2>
           <span class="badge badge-pill badge-light">
-            <a href="https://github.com/Cp0204/quark-auto-save/wiki/媒体库模块配置" target="_blank" title="媒体库模块配置">?</a>
+            <a href="https://github.com/Cp0204/quark-auto-save/wiki/插件配置" target="_blank" title="插件配置">?</a>
           </span>
         </div>
       </div>
-      <div v-for="(server, serverName) in formData.media_servers" :key="serverName" class="task mb-3">
+      <div v-for="(plugin, pluginName) in formData.plugins" :key="pluginName" class="task mb-3">
         <div class="form-group row" style="display:flex; align-items:center">
-          <div class="col-9" data-toggle="collapse" :data-target="'#collapse_'+serverName" aria-expanded="true" :aria-controls="'collapse_'+serverName">
+          <div class="col-9" data-toggle="collapse" :data-target="'#collapse_'+pluginName" aria-expanded="true" :aria-controls="'collapse_'+pluginName">
             <div class="btn btn-block text-left">
-              <i class="bi bi-caret-right-fill"></i> <span v-html="`${serverName}`"></span>
+              <i class="bi bi-caret-right-fill"></i> <span v-html="`${pluginName}`"></span>
             </div>
           </div>
         </div>
-        <div class="collapse" :id="'collapse_'+serverName" style="padding-left:2em">
-          <div v-for="(value, key) in server" :key="key" class="form-group row">
+        <div class="collapse" :id="'collapse_'+pluginName" style="padding-left:2em">
+          <div v-for="(value, key) in plugin" :key="key" class="form-group row">
             <label class="col-sm-2 col-form-label">{{ key }}</label>
             <div class="col-sm-10">
-              <input type="text" v-model="formData.media_servers[serverName][key]" class="form-control">
+              <input type="text" v-model="formData.plugins[pluginName][key]" class="form-control">
             </div>
           </div>
         </div>
@@ -264,9 +264,10 @@
               </div>
             </div>
             <div class="form-group row">
-              <label class="col-sm-2 col-form-label">媒体库ID</label>
+              <label class="col-sm-2 col-form-label">插件配置</label>
               <div class="col-sm-10">
-                <input type="number" name="media_id[]" class="form-control" v-model="task.media_id" placeholder="可选">
+                <!-- <input type="text" name="addition[]" class="form-control" v-model="task.addition" placeholder="可选"> -->
+                <v-jsoneditor v-model="task.addition" :options="{mode:'tree'}" :plus="false" height="180px"></v-jsoneditor>
               </div>
             </div>
           </div>
@@ -362,6 +363,7 @@
   <!-- 引入 Vue.js -->
   <script src="./static/js/vue@2.js"></script>
   <script src="./static/js/axios.min.js"></script>
+  <script src="./static/js/v-jsoneditor.min.js"></script>
 
   <script>
     var app = new Vue({
@@ -384,7 +386,7 @@
           pattern: "",
           replace: "",
           enddate: "",
-          media_id: "",
+          addition: {},
           ignore_extension: false,
           runweek: [1, 2, 3, 4, 5, 6, 7]
         },
@@ -460,16 +462,13 @@
                 }
                 return task;
               });
-              // 添加emby预设
-              if (!response.data.hasOwnProperty('emby')) {
-                response.data.emby = { ...this.emby };
-              }
               // 获取所有任务父目录
               response.data.tasklist.forEach(item => {
                 parentDir = this.getParentDirectory(item.savepath)
                 if (!this.taskDirs.includes(parentDir))
                   this.taskDirs.push(parentDir);
               });
+              this.newTask.addition = response.data.task_plugins_config;
               this.formData = response.data;
             })
             .catch(error => {

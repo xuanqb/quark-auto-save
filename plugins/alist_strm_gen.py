@@ -24,6 +24,9 @@ class Alist_strm_gen:
         "strm_save_dir": "/media",  # 生成的 strm 文件保存的路径
         "strm_replace_host": "",  # strm 文件内链接的主机地址 （可选，缺省时=url）
     }
+    default_task_config = {
+        "auto_gen": True,  # 是否自动生成 strm 文件
+    }
     is_active = False
     # 缓存参数
     storage_mount_path = None
@@ -31,12 +34,13 @@ class Alist_strm_gen:
     strm_server = None
 
     def __init__(self, **kwargs):
+        self.plugin_name = self.__class__.__name__.lower()
         if kwargs:
             for key, _ in self.default_config.items():
                 if key in kwargs:
                     setattr(self, key, kwargs[key])
                 else:
-                    print(f"{self.__class__.__name__} 模块缺少必要参数: {key}")
+                    print(f"{self.plugin_name} 模块缺少必要参数: {key}")
             if self.url and self.token and self.storage_id:
                 success, result = self.storage_id_to_path(self.storage_id)
                 if success:
@@ -53,7 +57,10 @@ class Alist_strm_gen:
                     else:
                         self.strm_server = f"{self.url.strip()}/d"
 
-    def run(self, task):
+    def run(self, task, **kwargs):
+        if task_config := task.get("addition", {}).get(self.plugin_name, {}):
+            if not task_config.get("auto_gen"):
+                return
         if task.get("savepath") and task.get("savepath").startswith(
             self.quark_root_dir
         ):
