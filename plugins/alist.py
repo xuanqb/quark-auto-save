@@ -62,25 +62,39 @@ class Alist:
         return False
 
     def storage_id_to_path(self, storage_id):
+        storage_mount_path, quark_root_dir = None, None
         # 1. 检查是否符合 /aaa:/bbb 格式
-        match = re.match(r"^(\/[^:]*):(\/[^:]*)$", storage_id)
-        if match:
-            return True, (match.group(1), match.group(2))
-        # 2. 调用 Alist API 获取存储信息
-        storage_info = self.get_storage_info(storage_id)
-        if storage_info:
-            if storage_info["driver"] == "Quark":
-                addition = json.loads(storage_info["addition"])
-                # 存储挂载路径
-                storage_mount_path = storage_info["mount_path"]
-                # 夸克根文件夹
-                quark_root_dir = self.get_root_folder_full_path(
-                    addition["cookie"], addition["root_folder_id"]
-                )
-                if storage_mount_path and quark_root_dir:
-                    return True, (storage_mount_path, quark_root_dir)
-            else:
-                print(f"Alist刷新: 不支持[{storage_info['driver']}]驱动 ❌")
+        if match := re.match(r"^(\/[^:]*):(\/[^:]*)$", storage_id):
+            # 存储挂载路径, 夸克根文件夹
+            storage_mount_path, quark_root_dir = match.group(1), match.group(2)
+            file_list = self.get_file_list(storage_mount_path)
+            if file_list.get("code") != 200:
+                print(f"Alist刷新: 获取挂载路径失败❌ {file_list.get('message')}")
+                return False, (None, None)
+        # 2. 检查是否数字，调用 Alist API 获取存储信息
+        elif re.match(r"^\d+$", storage_id):
+            if storage_info := self.get_storage_info(storage_id):
+                if storage_info["driver"] == "Quark":
+                    addition = json.loads(storage_info["addition"])
+                    # 存储挂载路径
+                    storage_mount_path = storage_info["mount_path"]
+                    # 夸克根文件夹
+                    quark_root_dir = self.get_root_folder_full_path(
+                        addition["cookie"], addition["root_folder_id"]
+                    )
+                elif storage_info["driver"] == "QuarkTV":
+                    print(
+                        f"Alist刷新: [QuarkTV]驱动⚠️ storage_id请手动填入 /Alist挂载路径:/Quark目录路径"
+                    )
+                else:
+                    print(f"Alist刷新: 不支持[{storage_info['driver']}]驱动 ❌")
+        else:
+            print(f"Alist刷新: storage_id[{storage_id}]格式错误❌")
+        # 返回结果
+        if storage_mount_path and quark_root_dir:
+            return True, (storage_mount_path, quark_root_dir)
+        else:
+            return False, (None, None)
 
     def get_storage_info(self, storage_id):
         url = f"{self.url}/api/admin/storage/get"
@@ -96,9 +110,27 @@ class Alist:
                 print(f"Alist刷新: 存储{storage_id}连接失败❌ {data.get('message')}")
         except requests.exceptions.RequestException as e:
             print(f"Alist刷新: 获取Alist存储出错 {e}")
-        return False
+        return []
 
-    def refresh(self, path, force_refresh=True):
+    def refresh(self, path):
+        data = self.get_file_list(path, True)
+        if data.get("code") == 200:
+            print(f"📁 Alist刷新：目录[{path}] 成功✅")
+            return data.get("data")
+        elif "object not found" in data.get("message", ""):
+            # 如果是根目录就不再往上查找
+            if path == "/" or path == self.storage_mount_path:
+                print(f"📁 Alist刷新：根目录不存在，请检查 Alist 配置")
+                return False
+            # 获取父目录
+            parent_path = os.path.dirname(path)
+            print(f"📁 Alist刷新：[{path}] 不存在，转父目录 [{parent_path}]")
+            # 递归刷新父目录
+            return self.refresh(parent_path)
+        else:
+            print(f"📁 Alist刷新：失败❌ {data.get('message')}")
+
+    def get_file_list(self, path, force_refresh=False):
         url = f"{self.url}/api/fs/list"
         headers = {"Authorization": self.token}
         payload = {
@@ -111,25 +143,10 @@ class Alist:
         try:
             response = requests.request("POST", url, headers=headers, json=payload)
             response.raise_for_status()
-            data = response.json()
-            if data.get("code") == 200:
-                print(f"📁 Alist刷新：目录[{path}] 成功✅")
-                return data.get("data")
-            elif "object not found" in data.get("message", ""):
-                # 如果是根目录就不再往上查找
-                if path == "/" or path == self.storage_mount_path:
-                    print(f"📁 Alist刷新：根目录不存在，请检查 Alist 配置")
-                    return False
-                # 获取父目录
-                parent_path = os.path.dirname(path)
-                print(f"📁 Alist刷新：[{path}] 不存在，转父目录 [{parent_path}]")
-                # 递归刷新父目录
-                return self.refresh(parent_path)
-            else:
-                print(f"📁 Alist刷新：失败❌ {data.get('message')}")
-        except requests.exceptions.RequestException as e:
-            print(f"Alist刷新目录出错: {e}")
-        return False
+            return response.json()
+        except Exception as e:
+            print(f"📁 Alist刷新: 获取文件列表出错❌ {e}")
+        return {}
 
     def get_root_folder_full_path(self, cookie, pdir_fid):
         if pdir_fid == "0":
@@ -162,4 +179,4 @@ class Alist:
                 return "/".join(file_names)
         except requests.exceptions.RequestException as e:
             print(f"Alist刷新: 获取Quark路径出错 {e}")
-        return False
+        return ""
