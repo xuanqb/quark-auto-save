@@ -39,18 +39,6 @@ MAGIC_REGEX = {
 }
 
 
-# 魔法正则匹配
-def magic_regex_func(pattern, replace, taskname=""):
-    keyword = pattern
-    if keyword in CONFIG_DATA["magic_regex"]:
-        pattern = CONFIG_DATA["magic_regex"][keyword]["pattern"]
-        if replace == "":
-            replace = CONFIG_DATA["magic_regex"][keyword]["replace"]
-    if taskname:
-        replace = replace.replace("$TASKNAME", taskname)
-    return pattern, replace
-
-
 # 发送通知消息
 def send_ql_notify(title, body):
     try:
@@ -75,40 +63,104 @@ def add_notify(text):
     return text
 
 
-# 下载配置
-def download_file(url, save_path):
-    response = requests.get(url)
-    if response.status_code == 200:
-        with open(save_path, "wb") as file:
-            file.write(response.content)
-        return True
-    else:
-        return False
-
-
-# 读取CK
-def get_cookies(cookie_val):
-    if isinstance(cookie_val, list):
-        return cookie_val
-    elif cookie_val:
-        if "\n" in cookie_val:
-            return cookie_val.split("\n")
+class Config:
+    # 下载配置
+    def download_file(url, save_path):
+        response = requests.get(url)
+        if response.status_code == 200:
+            with open(save_path, "wb") as file:
+                file.write(response.content)
+            return True
         else:
-            return [cookie_val]
-    else:
-        return False
+            return False
+
+    # 读取CK
+    def get_cookies(cookie_val):
+        if isinstance(cookie_val, list):
+            return cookie_val
+        elif cookie_val:
+            if "\n" in cookie_val:
+                return cookie_val.split("\n")
+            else:
+                return [cookie_val]
+        else:
+            return False
+
+    def load_plugins(plugins_config={}, plugins_dir="plugins"):
+        plugins_available = {}
+        task_plugins_config = {}
+        all_modules = [
+            f.replace(".py", "") for f in os.listdir(plugins_dir) if f.endswith(".py")
+        ]
+        # 调整模块优先级
+        priority_path = os.path.join(plugins_dir, "_priority.json")
+        try:
+            with open(priority_path, encoding="utf-8") as f:
+                priority_modules = json.load(f)
+            if priority_modules:
+                all_modules = [
+                    module for module in priority_modules if module in all_modules
+                ] + [module for module in all_modules if module not in priority_modules]
+        except (FileNotFoundError, json.JSONDecodeError):
+            priority_modules = []
+        for module_name in all_modules:
+            try:
+                module = importlib.import_module(f"{plugins_dir}.{module_name}")
+                ServerClass = getattr(module, module_name.capitalize())
+                # 检查配置中是否存在该模块的配置
+                if module_name in plugins_config:
+                    plugin = ServerClass(**plugins_config[module_name])
+                    plugins_available[module_name] = plugin
+                else:
+                    plugin = ServerClass()
+                    plugins_config[module_name] = plugin.default_config
+                # 检查插件是否支持单独任务配置
+                if hasattr(plugin, "default_task_config"):
+                    task_plugins_config[module_name] = plugin.default_task_config
+            except (ImportError, AttributeError) as e:
+                print(f"载入模块 {module_name} 失败: {e}")
+        print()
+        return plugins_available, plugins_config, task_plugins_config
+
+    def breaking_change_update(config_data):
+        if config_data.get("emby"):
+            print("🔼 Update config v0.3.6.1 to 0.3.7")
+            config_data.setdefault("media_servers", {})["emby"] = {
+                "url": config_data["emby"]["url"],
+                "token": config_data["emby"]["apikey"],
+            }
+            del config_data["emby"]
+            for task in config_data.get("tasklist", {}):
+                task["media_id"] = task.get("emby_id", "")
+                if task.get("emby_id"):
+                    del task["emby_id"]
+        if config_data.get("media_servers"):
+            print("🔼 Update config v0.3.8 to 0.3.9")
+            config_data["plugins"] = config_data.get("media_servers")
+            del config_data["media_servers"]
+            for task in config_data.get("tasklist", {}):
+                task["addition"] = {
+                    "emby": {
+                        "media_id": task.get("media_id", ""),
+                    }
+                }
+                if task.get("media_id"):
+                    del task["media_id"]
 
 
 class Quark:
+    BASE_URL = "https://drive-pc.quark.cn"
+    BASE_URL_APP = "https://drive-m.quark.cn"
+
     def __init__(self, cookie, index=None):
         self.cookie = cookie.strip()
         self.index = index + 1
         self.is_active = False
         self.nickname = ""
-        self.mparam = self.match_mparam_form_cookie(cookie)
+        self.mparam = self._match_mparam_form_cookie(cookie)
         self.savepath_fid = {"/": "0"}
 
-    def match_mparam_form_cookie(self, cookie):
+    def _match_mparam_form_cookie(self, cookie):
         mparam = {}
         kps_match = re.search(r"(?<!\w)kps=([a-zA-Z0-9%+/=]+)[;&]?", cookie)
         sign_match = re.search(r"(?<!\w)sign=([a-zA-Z0-9%+/=]+)[;&]?", cookie)
@@ -121,13 +173,26 @@ class Quark:
             }
         return mparam
 
-    def common_headers(self):
+    def _send_request(self, method, url, **kwargs):
         headers = {
             "cookie": self.cookie,
             "content-type": "application/json",
             "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/3.14.2 Chrome/112.0.5615.165 Electron/24.1.3.8 Safari/537.36 Channel/pckk_other_ch",
         }
-        return headers
+        if "headers" in kwargs:
+            headers = kwargs["headers"]
+            del kwargs["headers"]
+        try:
+            response = requests.request(method, url, headers=headers, **kwargs)
+            # print(f"{response.text}")
+            response.raise_for_status()  # 检查请求是否成功
+            return response
+        except Exception as e:
+            print(f"_send_request error:\n{e}")
+            fake_response = requests.Response()
+            fake_response.status_code = 500
+            fake_response._content = b'{"error": 1}'
+            return fake_response
 
     def init(self):
         account_info = self.get_account_info()
@@ -141,20 +206,14 @@ class Quark:
     def get_account_info(self):
         url = "https://pan.quark.cn/account/info"
         querystring = {"fr": "pc", "platform": "pc"}
-        headers = {
-            "cookie": self.cookie,
-            "content-type": "application/json",
-        }
-        response = requests.request(
-            "GET", url, headers=headers, params=querystring
-        ).json()
+        response = self._send_request("GET", url, params=querystring).json()
         if response.get("data"):
             return response["data"]
         else:
             return False
 
     def get_growth_info(self):
-        url = "https://drive-h.quark.cn/1/clouddrive/capacity/growth/info"
+        url = f"{self.BASE_URL_APP}/1/clouddrive/capacity/growth/info"
         querystring = {
             "pr": "ucpro",
             "fr": "android",
@@ -165,7 +224,7 @@ class Quark:
         headers = {
             "content-type": "application/json",
         }
-        response = requests.request(
+        response = self._send_request(
             "GET", url, headers=headers, params=querystring
         ).json()
         if response.get("data"):
@@ -174,7 +233,7 @@ class Quark:
             return False
 
     def get_growth_sign(self):
-        url = "https://drive-h.quark.cn/1/clouddrive/capacity/growth/sign"
+        url = f"{self.BASE_URL_APP}/1/clouddrive/capacity/growth/sign"
         querystring = {
             "pr": "ucpro",
             "fr": "android",
@@ -188,7 +247,7 @@ class Quark:
         headers = {
             "content-type": "application/json",
         }
-        response = requests.request(
+        response = self._send_request(
             "POST", url, json=payload, headers=headers, params=querystring
         ).json()
         if response.get("data"):
@@ -196,26 +255,13 @@ class Quark:
         else:
             return False, response["message"]
 
-    def get_id_from_url(self, url):
-        url = url.replace("https://pan.quark.cn/s/", "")
-        pattern = r"(\w+)(\?pwd=(\w+))?(#/list/share.*/(\w+))?"
-        match = re.search(pattern, url)
-        if match:
-            pwd_id = match.group(1)
-            passcode = match.group(3) if match.group(3) else ""
-            pdir_fid = match.group(5) if match.group(5) else 0
-            return pwd_id, passcode, pdir_fid
-        else:
-            return None
-
     # 可验证资源是否失效
     def get_stoken(self, pwd_id, passcode=""):
-        url = "https://drive-h.quark.cn/1/clouddrive/share/sharepage/token"
+        url = f"{self.BASE_URL}/1/clouddrive/share/sharepage/token"
         querystring = {"pr": "ucpro", "fr": "pc"}
         payload = {"pwd_id": pwd_id, "passcode": passcode}
-        headers = self.common_headers()
-        response = requests.request(
-            "POST", url, json=payload, headers=headers, params=querystring
+        response = self._send_request(
+            "POST", url, json=payload, params=querystring
         ).json()
         if response.get("status") == 200:
             return True, response["data"]["stoken"]
@@ -226,7 +272,7 @@ class Quark:
         list_merge = []
         page = 1
         while True:
-            url = "https://drive-h.quark.cn/1/clouddrive/share/sharepage/detail"
+            url = f"{self.BASE_URL}/1/clouddrive/share/sharepage/detail"
             querystring = {
                 "pr": "ucpro",
                 "fr": "pc",
@@ -241,10 +287,7 @@ class Quark:
                 "_fetch_total": "1",
                 "_sort": "file_type:asc,updated_at:desc",
             }
-            headers = self.common_headers()
-            response = requests.request(
-                "GET", url, headers=headers, params=querystring
-            ).json()
+            response = self._send_request("GET", url, params=querystring).json()
             if response["data"]["list"]:
                 list_merge += response["data"]["list"]
                 page += 1
@@ -258,12 +301,11 @@ class Quark:
     def get_fids(self, file_paths):
         fids = []
         while True:
-            url = "https://drive-h.quark.cn/1/clouddrive/file/info/path_list"
+            url = f"{self.BASE_URL}/1/clouddrive/file/info/path_list"
             querystring = {"pr": "ucpro", "fr": "pc"}
             payload = {"file_path": file_paths[:50], "namespace": "0"}
-            headers = self.common_headers()
-            response = requests.request(
-                "POST", url, json=payload, headers=headers, params=querystring
+            response = self._send_request(
+                "POST", url, json=payload, params=querystring
             ).json()
             if response["code"] == 0:
                 fids += response["data"]
@@ -279,7 +321,7 @@ class Quark:
         file_list = []
         page = 1
         while True:
-            url = "https://drive-h.quark.cn/1/clouddrive/file/sort"
+            url = f"{self.BASE_URL}/1/clouddrive/file/sort"
             querystring = {
                 "pr": "ucpro",
                 "fr": "pc",
@@ -292,10 +334,7 @@ class Quark:
                 "_sort": "file_type:asc,updated_at:desc",
                 "_fetch_full_path": kwargs.get("fetch_full_path", 0),
             }
-            headers = self.common_headers()
-            response = requests.request(
-                "GET", url, headers=headers, params=querystring
-            ).json()
+            response = self._send_request("GET", url, params=querystring).json()
             if response["data"]["list"]:
                 file_list += response["data"]["list"]
                 page += 1
@@ -306,7 +345,7 @@ class Quark:
         return file_list
 
     def save_file(self, fid_list, fid_token_list, to_pdir_fid, pwd_id, stoken):
-        url = "https://drive-h.quark.cn/1/clouddrive/share/sharepage/save"
+        url = f"{self.BASE_URL}/1/clouddrive/share/sharepage/save"
         querystring = {
             "pr": "ucpro",
             "fr": "pc",
@@ -324,24 +363,53 @@ class Quark:
             "pdir_fid": "0",
             "scene": "link",
         }
-        headers = self.common_headers()
-        response = requests.request(
-            "POST", url, json=payload, headers=headers, params=querystring
+        response = self._send_request(
+            "POST", url, json=payload, params=querystring
         ).json()
         return response
 
+    def query_task(self, task_id):
+        retry_index = 0
+        while True:
+            url = f"{self.BASE_URL}/1/clouddrive/task"
+            querystring = {
+                "pr": "ucpro",
+                "fr": "pc",
+                "uc_param_str": "",
+                "task_id": task_id,
+                "retry_index": retry_index,
+                "__dt": int(random.uniform(1, 5) * 60 * 1000),
+                "__t": datetime.now().timestamp(),
+            }
+            response = requests.request("GET", url, params=querystring).json()
+            if response["data"]["status"] != 0:
+                if retry_index > 0:
+                    print()
+                break
+            else:
+                if retry_index == 0:
+                    print(
+                        f"正在等待[{response['data']['task_title']}]执行结果",
+                        end="",
+                        flush=True,
+                    )
+                else:
+                    print(".", end="", flush=True)
+                retry_index += 1
+                time.sleep(0.500)
+        return response
+
     def download(self, fids):
-        url = "https://drive-h.quark.cn/1/clouddrive/file/download"
+        url = f"{self.BASE_URL}/1/clouddrive/file/download"
         querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
         payload = {"fids": fids}
-        headers = self.common_headers()
-        response = requests.post(url, json=payload, headers=headers, params=querystring)
+        response = self._send_request("POST", url, json=payload, params=querystring)
         set_cookie = response.cookies.get_dict()
         cookie_str = "; ".join([f"{key}={value}" for key, value in set_cookie.items()])
         return response.json(), cookie_str
 
     def mkdir(self, dir_path):
-        url = "https://drive-h.quark.cn/1/clouddrive/file"
+        url = f"{self.BASE_URL}/1/clouddrive/file"
         querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
         payload = {
             "pdir_fid": "0",
@@ -349,34 +417,31 @@ class Quark:
             "dir_path": dir_path,
             "dir_init_lock": False,
         }
-        headers = self.common_headers()
-        response = requests.request(
-            "POST", url, json=payload, headers=headers, params=querystring
+        response = self._send_request(
+            "POST", url, json=payload, params=querystring
         ).json()
         return response
 
     def rename(self, fid, file_name):
-        url = "https://drive-h.quark.cn/1/clouddrive/file/rename"
+        url = f"{self.BASE_URL}/1/clouddrive/file/rename"
         querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
         payload = {"fid": fid, "file_name": file_name}
-        headers = self.common_headers()
-        response = requests.request(
-            "POST", url, json=payload, headers=headers, params=querystring
+        response = self._send_request(
+            "POST", url, json=payload, params=querystring
         ).json()
         return response
 
     def delete(self, filelist):
-        url = "https://drive-h.quark.cn/1/clouddrive/file/delete"
+        url = f"{self.BASE_URL}/1/clouddrive/file/delete"
         querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
         payload = {"action_type": 2, "filelist": filelist, "exclude_fids": []}
-        headers = self.common_headers()
-        response = requests.request(
-            "POST", url, json=payload, headers=headers, params=querystring
+        response = self._send_request(
+            "POST", url, json=payload, params=querystring
         ).json()
         return response
 
     def recycle_list(self, page=1, size=30):
-        url = "https://drive-h.quark.cn/1/clouddrive/file/recycle/list"
+        url = f"{self.BASE_URL}/1/clouddrive/file/recycle/list"
         querystring = {
             "_page": page,
             "_size": size,
@@ -384,24 +449,47 @@ class Quark:
             "fr": "pc",
             "uc_param_str": "",
         }
-        headers = self.common_headers()
-        response = requests.request(
-            "GET", url, headers=headers, params=querystring
-        ).json()
+        response = self._send_request("GET", url, params=querystring).json()
         return response["data"]["list"]
 
     def recycle_remove(self, record_list):
-        url = "https://drive-h.quark.cn/1/clouddrive/file/recycle/remove"
+        url = f"{self.BASE_URL}/1/clouddrive/file/recycle/remove"
         querystring = {"uc_param_str": "", "fr": "pc", "pr": "ucpro"}
         payload = {
             "select_mode": 2,
             "record_list": record_list,
         }
-        headers = self.common_headers()
-        response = requests.request(
-            "POST", url, json=payload, headers=headers, params=querystring
+        response = self._send_request(
+            "POST", url, json=payload, params=querystring
         ).json()
         return response
+
+    # ↑ 请求函数
+    # ↓ 操作函数
+
+    # 魔法正则匹配
+    def magic_regex_func(self, pattern, replace, taskname=None):
+        magic_regex = CONFIG_DATA.get("magic_regex") or MAGIC_REGEX or {}
+        keyword = pattern
+        if keyword in magic_regex:
+            pattern = magic_regex[keyword]["pattern"]
+            if replace == "":
+                replace = magic_regex[keyword]["replace"]
+        if taskname:
+            replace = replace.replace("$TASKNAME", taskname)
+        return pattern, replace
+
+    def get_id_from_url(self, url):
+        url = url.replace("https://pan.quark.cn/s/", "")
+        pattern = r"(\w+)(\?pwd=(\w+))?(#/list/share.*/(\w+))?"
+        match = re.search(pattern, url)
+        if match:
+            pwd_id = match.group(1)
+            passcode = match.group(3) if match.group(3) else ""
+            pdir_fid = match.group(5) if match.group(5) else 0
+            return pwd_id, passcode, pdir_fid
+        else:
+            return None
 
     def update_savepath_fid(self, tasklist):
         dir_paths = [
@@ -551,7 +639,7 @@ class Quark:
             if share_file["dir"] and task.get("update_subdir", False):
                 pattern, replace = task["update_subdir"], ""
             else:
-                pattern, replace = magic_regex_func(
+                pattern, replace = self.magic_regex_func(
                     task["pattern"], task["replace"], task["taskname"]
                 )
             # 正则文件名匹配
@@ -643,42 +731,8 @@ class Quark:
                 add_notify(f"❌《{task['taskname']}》转存失败：{err_msg}\n")
         return tree
 
-    def query_task(self, task_id):
-        retry_index = 0
-        while True:
-            url = "https://drive-h.quark.cn/1/clouddrive/task"
-            querystring = {
-                "pr": "ucpro",
-                "fr": "pc",
-                "uc_param_str": "",
-                "task_id": task_id,
-                "retry_index": retry_index,
-                "__dt": int(random.uniform(1, 5) * 60 * 1000),
-                "__t": datetime.now().timestamp(),
-            }
-            headers = self.common_headers()
-            response = requests.request(
-                "GET", url, headers=headers, params=querystring
-            ).json()
-            if response["data"]["status"] != 0:
-                if retry_index > 0:
-                    print()
-                break
-            else:
-                if retry_index == 0:
-                    print(
-                        f"正在等待[{response['data']['task_title']}]执行结果",
-                        end="",
-                        flush=True,
-                    )
-                else:
-                    print(".", end="", flush=True)
-                retry_index += 1
-                time.sleep(0.500)
-        return response
-
     def do_rename_task(self, task, subdir_path=""):
-        pattern, replace = magic_regex_func(
+        pattern, replace = self.magic_regex_func(
             task["pattern"], task["replace"], task["taskname"]
         )
         if not pattern or not replace:
@@ -712,44 +766,6 @@ class Quark:
                             f"重命名：{dir_file['file_name']} → {save_name} 失败，{rename_return['message']}"
                         )
         return is_rename_count > 0
-
-
-def load_plugins(plugins_config, plugins_dir="plugins"):
-    plugins_available = {}
-    task_plugins_config = {}
-    all_modules = [
-        f.replace(".py", "") for f in os.listdir(plugins_dir) if f.endswith(".py")
-    ]
-    # 调整模块优先级
-    priority_path = os.path.join(plugins_dir, "_priority.json")
-    try:
-        with open(priority_path, encoding="utf-8") as f:
-            priority_modules = json.load(f)
-        if priority_modules:
-            all_modules = [
-                module for module in priority_modules if module in all_modules
-            ] + [module for module in all_modules if module not in priority_modules]
-    except (FileNotFoundError, json.JSONDecodeError):
-        priority_modules = []
-    print(f"🧩 载入插件")
-    for module_name in all_modules:
-        try:
-            module = importlib.import_module(f"{plugins_dir}.{module_name}")
-            ServerClass = getattr(module, module_name.capitalize())
-            # 检查配置中是否存在该模块的配置
-            if module_name in plugins_config:
-                plugin = ServerClass(**plugins_config[module_name])
-                plugins_available[module_name] = plugin
-            else:
-                plugin = ServerClass()
-                plugins_config[module_name] = plugin.default_config
-            # 检查插件是否支持单独任务配置
-            if hasattr(plugin, "default_task_config"):
-                task_plugins_config[module_name] = plugin.default_task_config
-        except (ImportError, AttributeError) as e:
-            print(f"载入模块 {module_name} 失败: {e}")
-    print()
-    return plugins_available, task_plugins_config
 
 
 def verify_account(account):
@@ -812,7 +828,8 @@ def do_sign(account):
 
 
 def do_save(account, tasklist=[]):
-    plugins, CONFIG_DATA["task_plugins_config"] = load_plugins(
+    print(f"🧩 载入插件")
+    plugins, CONFIG_DATA["plugins"], task_plugins_config = Config.load_plugins(
         CONFIG_DATA.get("plugins", {})
     )
     print(f"转存账号: {account.nickname}")
@@ -868,7 +885,7 @@ def do_save(account, tasklist=[]):
                 return result
 
             task["addition"] = merge_dicts(
-                task.get("addition", {}), CONFIG_DATA["task_plugins_config"]
+                task.get("addition", {}), task_plugins_config
             )
             # 调用插件
             if is_new_tree or is_rename:
@@ -879,33 +896,6 @@ def do_save(account, tasklist=[]):
                             plugin.run(task, account=account, tree=is_new_tree) or task
                         )
     print()
-
-
-def breaking_change_update():
-    global CONFIG_DATA
-    if CONFIG_DATA.get("emby"):
-        print("🔼 Update config v0.3.6.1 to 0.3.7")
-        CONFIG_DATA.setdefault("media_servers", {})["emby"] = {
-            "url": CONFIG_DATA["emby"]["url"],
-            "token": CONFIG_DATA["emby"]["apikey"],
-        }
-        del CONFIG_DATA["emby"]
-        for task in CONFIG_DATA.get("tasklist", {}):
-            task["media_id"] = task.get("emby_id", "")
-            if task.get("emby_id"):
-                del task["emby_id"]
-    if CONFIG_DATA.get("media_servers"):
-        print("🔼 Update config v0.3.8 to 0.3.9")
-        CONFIG_DATA["plugins"] = CONFIG_DATA.get("media_servers")
-        del CONFIG_DATA["media_servers"]
-        for task in CONFIG_DATA.get("tasklist", {}):
-            task["addition"] = {
-                "emby": {
-                    "media_id": task.get("media_id", ""),
-                }
-            }
-            if task.get("media_id"):
-                del task["media_id"]
 
 
 def main():
@@ -928,20 +918,20 @@ def main():
         else:
             print(f"⚙️ 配置文件 {config_path} 不存在❌，正远程从下载配置模版")
             config_url = f"{GH_PROXY}https://raw.githubusercontent.com/Cp0204/quark_auto_save/main/quark_config.json"
-            if download_file(config_url, config_path):
+            if Config.download_file(config_url, config_path):
                 print("⚙️ 配置模版下载成功✅，请到程序目录中手动配置")
             return
     else:
         print(f"⚙️ 正从 {config_path} 文件中读取配置")
         with open(config_path, "r", encoding="utf-8") as file:
             CONFIG_DATA = json.load(file)
-            breaking_change_update()
+            Config.breaking_change_update(CONFIG_DATA)
         cookie_val = CONFIG_DATA.get("cookie")
         if not CONFIG_DATA.get("magic_regex"):
             CONFIG_DATA["magic_regex"] = MAGIC_REGEX
         cookie_form_file = True
     # 获取cookie
-    cookies = get_cookies(cookie_val)
+    cookies = Config.get_cookies(cookie_val)
     if not cookies:
         print("❌ cookie 未配置")
         return
@@ -974,7 +964,7 @@ def main():
     if cookie_form_file:
         # 更新配置
         with open(config_path, "w", encoding="utf-8") as file:
-            json.dump(CONFIG_DATA, file, ensure_ascii=False, indent=2)
+            json.dump(CONFIG_DATA, file, ensure_ascii=False, sort_keys=False, indent=2)
 
     print(f"===============程序结束===============")
     duration = datetime.now() - start_time
