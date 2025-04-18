@@ -68,6 +68,12 @@ def magic_regex_func(pattern, replace, taskname=""):
             'repl': r'\1'
         },
         {
+            # '2025.4.4-第11期下.mp4' to '20250404-第11期下.mp4'
+            'pattern': re.compile(r'(\d{4})\.(\d{1,2})\.(\d{1,2})'),
+            'repl': lambda m: f"{m.group(1)}{int(m.group(2)):02d}{int(m.group(3)):02d}"
+        },
+        {
+            # 兜底配置 
             # '0422春日焕新特辑毛雪汪小屋春日大变样.mp4' to '20240422春日焕新特辑毛雪汪小屋春日大变样.mp4'
             'pattern': re.compile(r'^(\d{4})(?=\D)'),
             'repl': fr'{year}\1'
