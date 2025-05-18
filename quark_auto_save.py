@@ -156,6 +156,7 @@ def update_alist(task):
 
 
 class Quark:
+    BASE_URL = "https://drive-pc.quark.cn"
     def __init__(self, cookie, index=None):
         self.cookie = cookie.strip()
         self.index = index + 1
@@ -400,7 +401,7 @@ class Quark:
         return response
 
     def rename(self, fid, file_name):
-        url = "https://drive-h.quark.cn/1/clouddrive/file/rename"
+        url = f"{self.BASE_URL}/1/clouddrive/file/rename"
         querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
         payload = {"fid": fid, "file_name": file_name}
         headers = self.common_headers()
