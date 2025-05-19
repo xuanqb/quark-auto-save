@@ -401,14 +401,20 @@ class Quark:
         return response
 
     def rename(self, fid, file_name):
+        time.sleep(5)
         url = f"{self.BASE_URL}/1/clouddrive/file/rename"
         querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
         payload = {"fid": fid, "file_name": file_name}
         headers = self.common_headers()
         response = requests.request(
             "POST", url, json=payload, headers=headers, params=querystring
-        ).json()
-        return response
+        )
+        try:
+            resp_json = response.json()
+        except Exception:
+            resp_json = {"error": "Invalid JSON", "text": response.text}
+        logging.info(f"重命名接口返回: {resp_json}")
+        return resp_json
 
     def delete(self, filelist):
         url = "https://drive-h.quark.cn/1/clouddrive/file/delete"
