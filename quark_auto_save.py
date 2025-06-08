@@ -152,12 +152,14 @@ def update_alist(task):
     if 'url' not in alist_leisure_strm_create:
         alist_leisure_strm_create['url'] = '/quark' + task['savepath']
     # 两分钟后再调用接口
-    time.sleep(120)
     requests.get(url=CONFIG_DATA.get('leisure_strm_create'), params=alist_leisure_strm_create)
 
 
 class Quark:
     BASE_URL = "https://drive-pc.quark.cn"
+    BASE_URL_APP = "https://drive-m.quark.cn"
+    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/3.14.2 Chrome/112.0.5615.165 Electron/24.1.3.8 Safari/537.36 Channel/pckk_other_ch"
+
     def __init__(self, cookie, index=None):
         self.cookie = cookie.strip()
         self.index = index + 1
@@ -179,10 +181,63 @@ class Quark:
             }
         return mparam
 
+    def _send_request(self, method, url, **kwargs):
+        headers = {
+            "cookie": self.cookie,
+            "content-type": "application/json",
+            "user-agent": self.USER_AGENT,
+        }
+        if "headers" in kwargs:
+            headers = kwargs["headers"]
+            del kwargs["headers"]
+        if self.mparam and "share" in url and self.BASE_URL in url:
+            url = url.replace(self.BASE_URL, self.BASE_URL_APP)
+            kwargs["params"].update(
+                {
+                    "device_model": "M2011K2C",
+                    "entry": "default_clouddrive",
+                    "_t_group": "0%3A_s_vp%3A1",
+                    "dmn": "Mi%2B11",
+                    "fr": "android",
+                    "pf": "3300",
+                    "bi": "35937",
+                    "ve": "7.4.5.680",
+                    "ss": "411x875",
+                    "mi": "M2011K2C",
+                    "nt": "5",
+                    "nw": "0",
+                    "kt": "4",
+                    "pr": "ucpro",
+                    "sv": "release",
+                    "dt": "phone",
+                    "data_from": "ucapi",
+                    "kps": self.mparam.get("kps"),
+                    "sign": self.mparam.get("sign"),
+                    "vcode": self.mparam.get("vcode"),
+                    "app": "clouddrive",
+                    "kkkk": "1",
+                }
+            )
+            del headers["cookie"]
+        try:
+            response = requests.request(method, url, headers=headers, **kwargs)
+            # print(f"{response.text}")
+            # response.raise_for_status()  # 检查请求是否成功，但返回非200也会抛出异常
+            return response
+        except Exception as e:
+            print(f"_send_request error:\n{e}")
+            fake_response = requests.Response()
+            fake_response.status_code = 500
+            fake_response._content = (
+                b'{"status": 500, "code": 1, "message": "request error"}'
+            )
+            return fake_response
+
     def common_headers(self):
         headers = {
             "cookie": self.cookie,
             "content-type": "application/json",
+            "user-agent": self.USER_AGENT
         }
         return headers
 
@@ -298,10 +353,9 @@ class Quark:
                 "_fetch_total": "1",
                 "_sort": "file_type:asc,updated_at:desc",
             }
-            headers = self.common_headers()
-            response = requests.request(
-                "GET", url, headers=headers, params=querystring
-            ).json()
+            response = self._send_request("GET", url, params=querystring).json()
+            if response["code"] != 0:
+                return response
             if response["data"]["list"]:
                 list_merge += response["data"]["list"]
                 page += 1
@@ -310,7 +364,7 @@ class Quark:
             if len(list_merge) >= response["metadata"]["_total"]:
                 break
         response["data"]["list"] = list_merge
-        return response["data"]
+        return response
 
     def get_fids(self, file_paths):
         fids = []
@@ -332,8 +386,8 @@ class Quark:
                 break
         return fids
 
-    def ls_dir(self, pdir_fid):
-        file_list = []
+    def ls_dir(self, pdir_fid, **kwargs):
+        list_merge = []
         page = 1
         while True:
             url = f"{self.BASE_URL}/1/clouddrive/file/sort"
@@ -347,19 +401,20 @@ class Quark:
                 "_fetch_total": "1",
                 "_fetch_sub_dirs": "0",
                 "_sort": "file_type:asc,updated_at:desc",
+                "_fetch_full_path": kwargs.get("fetch_full_path", 0),
             }
-            headers = self.common_headers()
-            response = requests.request(
-                "GET", url, headers=headers, params=querystring
-            ).json()
+            response = self._send_request("GET", url, params=querystring).json()
+            if response["code"] != 0:
+                return response
             if response["data"]["list"]:
-                file_list += response["data"]["list"]
+                list_merge += response["data"]["list"]
                 page += 1
             else:
                 break
-            if len(file_list) >= response["metadata"]["_total"]:
+            if len(list_merge) >= response["metadata"]["_total"]:
                 break
-        return file_list
+        response["data"]["list"] = list_merge
+        return response
 
     def save_file(self, fid_list, fid_token_list, to_pdir_fid, pwd_id, stoken):
         url = f"{self.BASE_URL}/1/clouddrive/share/sharepage/save"
@@ -402,20 +457,13 @@ class Quark:
         return response
 
     def rename(self, fid, file_name):
-        time.sleep(5)
         url = f"{self.BASE_URL}/1/clouddrive/file/rename"
         querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
         payload = {"fid": fid, "file_name": file_name}
-        headers = self.common_headers()
-        response = requests.request(
-            "POST", url, json=payload, headers=headers, params=querystring
-        )
-        try:
-            resp_json = response.json()
-        except Exception:
-            resp_json = {"error": "Invalid JSON", "text": response.text}
-        logging.info(f"重命名接口返回: {resp_json}")
-        return resp_json
+        response = self._send_request(
+            "POST", url, json=payload, params=querystring
+        ).json()
+        return response
 
     def delete(self, filelist):
         url = "{self.BASE_URL}/1/clouddrive/file/delete"
@@ -490,7 +538,7 @@ class Quark:
         try:
             pwd_id, passcode, pdir_fid = self.get_id_from_url(shareurl)
             is_sharing, stoken = self.get_stoken(pwd_id, passcode)
-            share_file_list = self.get_detail(pwd_id, stoken, pdir_fid)["list"]
+            share_file_list = self.get_detail(pwd_id, stoken, pdir_fid)["data"]["list"]
             fid_list = [item["fid"] for item in share_file_list]
             fid_token_list = [item["share_fid_token"] for item in share_file_list]
             file_name_list = [item["file_name"] for item in share_file_list]
@@ -506,7 +554,7 @@ class Quark:
             if save_file["code"] == 41017:
                 return
             elif save_file["code"] == 0:
-                dir_file_list = self.ls_dir(to_pdir_fid)
+                dir_file_list = self.ls_dir(to_pdir_fid)["data"]["list"]
                 del_list = [
                     item["fid"]
                     for item in dir_file_list
@@ -559,7 +607,7 @@ class Quark:
         tree = Tree()
         tree.create_node(task["savepath"], pdir_fid)
         # 获取分享文件列表
-        share_file_list = self.get_detail(pwd_id, stoken, pdir_fid)["list"]
+        share_file_list = self.get_detail(pwd_id, stoken, pdir_fid)["data"]["list"]
         # logging.info("share_file_list: ", share_file_list)
 
         if not share_file_list:
@@ -575,7 +623,7 @@ class Quark:
             logging.info("🧠 该分享是一个文件夹，读取文件夹内列表")
             share_file_list = self.get_detail(
                 pwd_id, stoken, share_file_list[0]["fid"]
-            )["list"]
+            )["data"]["list"]
 
         # 获取目标目录文件列表
         savepath = re.sub(r"/{2,}", "/", f"/{task['savepath']}{subdir_path}")
@@ -586,7 +634,7 @@ class Quark:
                 logging.info(f"❌ 目录 {savepath} fid获取失败，跳过转存")
                 return tree
         to_pdir_fid = self.savepath_fid[savepath]
-        dir_file_list = self.ls_dir(to_pdir_fid)
+        dir_file_list = self.ls_dir(to_pdir_fid)["data"]["list"]
         # logging.info("dir_file_list: ", dir_file_list)
 
         # 需保存的文件清单
@@ -728,7 +776,9 @@ class Quark:
         savepath = re.sub(r"/{2,}", "/", f"/{task['savepath']}{subdir_path}")
         if not self.savepath_fid.get(savepath):
             self.savepath_fid[savepath] = self.get_fids([savepath])[0]["fid"]
-        dir_file_list = self.ls_dir(self.savepath_fid[savepath])
+        # 转成成功 但是我的文件里并没有
+        time.sleep(5)
+        dir_file_list = self.ls_dir(self.savepath_fid[savepath])["data"]["list"]
         dir_file_name_list = [item["file_name"] for item in dir_file_list]
         is_rename_count = 0
         for dir_file in dir_file_list:
@@ -746,12 +796,13 @@ class Quark:
                     if re.match(reg['pattern'], dir_file["file_name"]):
                         save_name = re.sub(reg['pattern'], reg['repl'], dir_file["file_name"])
                         break
+                logging.info(f'save_name: {save_name}, dir_file_name: {dir_file["file_name"]}')
                 if save_name != dir_file["file_name"] and (
                         save_name not in dir_file_name_list
                 ):
+                    logging.info(f"重命名：{dir_file['file_name']} → {save_name}")
                     rename_return = self.rename(dir_file["fid"], save_name)
                     if rename_return["code"] == 0:
-                        logging.info(f"重命名：{dir_file['file_name']} → {save_name}")
                         is_rename_count += 1
                     else:
                         logging.info(
