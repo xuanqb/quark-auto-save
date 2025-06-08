@@ -796,7 +796,7 @@ class Quark:
                     if re.match(reg['pattern'], dir_file["file_name"]):
                         save_name = re.sub(reg['pattern'], reg['repl'], dir_file["file_name"])
                         break
-                logging.info(f'save_name: {save_name}, dir_file_name: {dir_file["file_name"]}')
+                # logging.info(f'save_name: {save_name}, dir_file_name: {dir_file["file_name"]}')
                 if save_name != dir_file["file_name"] and (
                         save_name not in dir_file_name_list
                 ):
