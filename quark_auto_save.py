@@ -151,7 +151,8 @@ def update_alist(task):
         alist_leisure_strm_create['create_nfo'] = 'True'
     if 'url' not in alist_leisure_strm_create:
         alist_leisure_strm_create['url'] = '/quark' + task['savepath']
-
+    # 两分钟后再调用接口
+    time.sleep(120)
     requests.get(url=CONFIG_DATA.get('leisure_strm_create'), params=alist_leisure_strm_create)
 
 
