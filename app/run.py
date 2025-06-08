@@ -212,7 +212,7 @@ def get_share_files():
     if not is_sharing:
         return jsonify({"error": stoken})
     share_detail = account.get_detail(pwd_id, stoken, pdir_fid, 1)
-    return jsonify(share_detail)
+    return jsonify(share_detail["data"])
 
 
 @app.route("/get_savepath")
