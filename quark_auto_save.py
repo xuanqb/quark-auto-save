@@ -989,6 +989,8 @@ def do_save(account, tasklist=[]):
             # 刷新alist
             if is_new or is_rename:
                 update_alist(task)
+                time.sleep(5)
+
             # 刷新媒体库
             if emby.is_active and (is_new or is_rename) and task.get("emby_id") != "0":
                 if task.get("emby_id"):
