@@ -58,9 +58,9 @@ def magic_regex_func(pattern, replace, taskname=""):
     year = datetime.now().year
     reg_arr = [
         {
-            # '2024.06.08-第4期.mp4' to '20240608-第4期.mp4'
-            'pattern': re.compile(r'(\d{4})\.(\d{2})\.(\d{2})'),
-            'repl': r'\1\2\3'
+            # 新增：将（上）（下）替换为上 下
+            'pattern': re.compile(r'（([上下])）'),
+            'repl': r'\1'
         },
         {
             # '第20240728期喜人奇妙夜.mp4' to '20240728期喜人奇妙夜.mp4'
@@ -68,14 +68,14 @@ def magic_regex_func(pattern, replace, taskname=""):
             'repl': r'\1'
         },
         {
+            # '2024.06.08-第4期.mp4' to '20240608-第4期.mp4'
+            'pattern': re.compile(r'(\d{4})\.(\d{2})\.(\d{2})'),
+            'repl': r'\1\2\3'
+        },
+        {
             # '2025.4.4-第11期下.mp4' to '20250404-第11期下.mp4'
             'pattern': re.compile(r'(\d{4})\.(\d{1,2})\.(\d{1,2})'),
             'repl': lambda m: f"{m.group(1)}{int(m.group(2)):02d}{int(m.group(3)):02d}"
-        },
-        {
-            # 新增：将（上）（下）替换为上 下
-            'pattern': re.compile(r'（(上|下)）'),
-            'repl': r'\1'
         },
         {
             # 兜底配置 
@@ -663,9 +663,8 @@ class Quark:
                     else share_file["file_name"]
                 )
                 for reg in reg_arr:
-                    if re.match(reg['pattern'], share_file["file_name"]):
+                    if re.search(reg['pattern'], share_file["file_name"]):
                         save_name = re.sub(reg['pattern'], reg['repl'], share_file["file_name"])
-                        break
                 # 忽略后缀
                 if task.get("ignore_extension") and not share_file["dir"]:
                     compare_func = lambda a, b1, b2: (
