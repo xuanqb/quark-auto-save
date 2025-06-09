@@ -73,6 +73,11 @@ def magic_regex_func(pattern, replace, taskname=""):
             'repl': lambda m: f"{m.group(1)}{int(m.group(2)):02d}{int(m.group(3)):02d}"
         },
         {
+            # 新增：将（上）（下）替换为上 下
+            'pattern': re.compile(r'（(上|下)）'),
+            'repl': r'\1'
+        },
+        {
             # 兜底配置 
             # '0422春日焕新特辑毛雪汪小屋春日大变样.mp4' to '20240422春日焕新特辑毛雪汪小屋春日大变样.mp4'
             'pattern': re.compile(r'^(\d{4})(?=\D)'),
