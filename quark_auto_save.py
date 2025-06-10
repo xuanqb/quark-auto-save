@@ -663,8 +663,8 @@ class Quark:
                     else share_file["file_name"]
                 )
                 for reg in reg_arr:
-                    if re.search(reg['pattern'], share_file["file_name"]):
-                        save_name = re.sub(reg['pattern'], reg['repl'], share_file["file_name"])
+                    if re.search(reg['pattern'], save_name):
+                        save_name = re.sub(reg['pattern'], reg['repl'], save_name)
                 # 忽略后缀
                 if task.get("ignore_extension") and not share_file["dir"]:
                     compare_func = lambda a, b1, b2: (
@@ -797,8 +797,8 @@ class Quark:
                     else dir_file["file_name"]
                 )
                 for reg in reg_arr:
-                    if re.match(reg['pattern'], dir_file["file_name"]):
-                        save_name = re.sub(reg['pattern'], reg['repl'], dir_file["file_name"])
+                    if re.match(reg['pattern'], save_name):
+                        save_name = re.sub(reg['pattern'], reg['repl'], save_name)
                         break
                 # logging.info(f'save_name: {save_name}, dir_file_name: {dir_file["file_name"]}')
                 if save_name != dir_file["file_name"] and (
