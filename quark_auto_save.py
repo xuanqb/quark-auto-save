@@ -63,6 +63,11 @@ def magic_regex_func(pattern, replace, taskname=""):
             'repl': r'\1'
         },
         {
+            # 将未来的日期转换成现在的日期
+            'pattern': re.compile(r'^(20(?:2[6-9]|[3-9]\d))(\d{4})(?=\D|$)'),
+            'repl': fr'{year}\2'
+        },
+        {
             # '第20240728期喜人奇妙夜.mp4' to '20240728期喜人奇妙夜.mp4'
             'pattern': re.compile(r'^第((\d{8})([\s\S])*)'),
             'repl': r'\1'
