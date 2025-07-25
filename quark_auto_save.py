@@ -28,10 +28,14 @@ logging.basicConfig(
 # 兼容青龙
 try:
     from treelib import Tree
-except:
+except ImportError:
     logging.info("正在尝试自动安装依赖...")
     os.system("pip3 install treelib &> /dev/null")
     from treelib import Tree
+
+# 常量定义
+RANDOM_DELAY_MIN = 1  # 最小延迟分钟数
+RANDOM_DELAY_MAX = 5  # 最大延迟分钟数
 
 CONFIG_DATA = {}
 NOTIFYS = []
@@ -44,52 +48,100 @@ MAGIC_REGEX = {
     },
 }
 
+# 文件名处理规则 - 预编译正则表达式提升性能
+FILENAME_RULES = [
+    {
+        'name': 'remove_parentheses',
+        'pattern': re.compile(r'（([上下])）'), 
+        'replace': r'\1',
+        'desc': '将（上）（下）替换为上下'
+    },
+    {
+        'name': 'remove_episode_prefix',
+        'pattern': re.compile(r'^第((\d{8})([\s\S]*)*)'), 
+        'replace': r'\1',
+        'desc': '去掉"第"字前缀'
+    },
+    {
+        'name': 'format_single_digit_date',
+        'pattern': re.compile(r'(\d{4})\.(\d{1,2})\.(\d{1,2})'), 
+        'replace': 'lambda',
+        'desc': '格式化单位数日期：2025.4.4 → 20250404'
+    },
+    {
+        'name': 'format_date_with_dots',
+        'pattern': re.compile(r'(\d{4})\.(\d{2})\.(\d{2})'), 
+        'replace': r'\1\2\3',
+        'desc': '格式化日期：2024.06.08 → 20240608'
+    },
+    {
+        'name': 'convert_future_year', 
+        'pattern': re.compile(r'^(20(?:2[6-9]|[3-9]\d))(\d{4})(?=\D|$)'),
+        'replace': 'current_year',
+        'desc': '将未来年份转换为当前年份'
+    },
+    {
+        'name': 'add_year_prefix',
+        'pattern': re.compile(r'^(\d{4})(?=\D)'),
+        'replace': 'add_current_year', 
+        'desc': '给4位数字加年份前缀'
+    }
+]
 
-# 魔法正则匹配
+
+def apply_filename_rules(filename):
+    """应用文件名规则，逐个处理"""
+    result = filename
+    current_year = datetime.now().year
+    
+    for rule in FILENAME_RULES:
+        pattern = rule['pattern']  # 直接使用预编译的正则
+        if not pattern.search(result):
+            continue
+            
+        replace_type = rule['replace']
+        
+        # 根据替换类型执行不同逻辑
+        if replace_type == 'lambda':
+            result = pattern.sub(lambda m: f"{m.group(1)}{int(m.group(2)):02d}{int(m.group(3)):02d}", result)
+        elif replace_type == 'current_year':
+            result = pattern.sub(fr'{current_year}\2', result)
+        elif replace_type == 'add_current_year':
+            result = pattern.sub(fr'{current_year}\1', result)
+        else:
+            # 普通字符串替换
+            result = pattern.sub(replace_type, result)
+    
+    return result
+
+
 def magic_regex_func(pattern, replace, taskname=""):
-    keyword = pattern
-    if keyword in CONFIG_DATA["magic_regex"]:
-        pattern = CONFIG_DATA["magic_regex"][keyword]["pattern"]
+    """
+    魔法正则匹配函数 - 重构后版本，提高可读性和性能
+    
+    Args:
+        pattern (str): 匹配模式或魔法关键字
+        replace (str): 替换字符串
+        taskname (str): 任务名称，用于$TASKNAME替换
+    
+    Returns:
+        tuple: (pattern, replace)
+            - pattern: 处理后的匹配模式
+            - replace: 处理后的替换字符串  
+    """
+    # 处理魔法关键字
+    if pattern in CONFIG_DATA.get("magic_regex", {}):
+        magic_config = CONFIG_DATA["magic_regex"][pattern]
+        pattern = magic_config["pattern"]
         if replace == "":
-            replace = CONFIG_DATA["magic_regex"][keyword]["replace"]
-    if taskname:
+            replace = magic_config["replace"]
+    
+    # 处理任务名称占位符
+    if taskname and "$TASKNAME" in replace:
         replace = replace.replace("$TASKNAME", taskname)
-    # 正则文件名匹配
-    year = datetime.now().year
-    reg_arr = [
-        {
-            # 新增：将（上）（下）替换为上 下
-            'pattern': re.compile(r'（([上下])）'),
-            'repl': r'\1'
-        },
-        {
-            # 将未来的日期转换成现在的日期
-            'pattern': re.compile(r'^(20(?:2[6-9]|[3-9]\d))(\d{4})(?=\D|$)'),
-            'repl': fr'{year}\2'
-        },
-        {
-            # '第20240728期喜人奇妙夜.mp4' to '20240728期喜人奇妙夜.mp4'
-            'pattern': re.compile(r'^第((\d{8})([\s\S])*)'),
-            'repl': r'\1'
-        },
-        {
-            # '2024.06.08-第4期.mp4' to '20240608-第4期.mp4'
-            'pattern': re.compile(r'(\d{4})\.(\d{2})\.(\d{2})'),
-            'repl': r'\1\2\3'
-        },
-        {
-            # '2025.4.4-第11期下.mp4' to '20250404-第11期下.mp4'
-            'pattern': re.compile(r'(\d{4})\.(\d{1,2})\.(\d{1,2})'),
-            'repl': lambda m: f"{m.group(1)}{int(m.group(2)):02d}{int(m.group(3)):02d}"
-        },
-        {
-            # 兜底配置 
-            # '0422春日焕新特辑毛雪汪小屋春日大变样.mp4' to '20240422春日焕新特辑毛雪汪小屋春日大变样.mp4'
-            'pattern': re.compile(r'^(\d{4})(?=\D)'),
-            'repl': fr'{year}\1'
-        }
-    ]
-    return pattern, replace, reg_arr
+    
+    # 返回处理结果
+    return pattern, replace
 
 
 # 发送通知消息
@@ -104,8 +156,7 @@ def send_ql_notify(title, body):
             notify.push_config = CONFIG_DATA["push_config"]
         notify.send(title, body)
     except Exception as e:
-        if e:
-            logging.info("发送通知消息失败！")
+        logging.warning(f"发送通知消息失败: {str(e)}")
 
 
 # 添加消息
@@ -143,25 +194,28 @@ def get_cookies(cookie_val):
 def update_alist(task):
     try:
         alist_leisure_strm_create = json.loads(task['alist_leisure_strm_create'])
-    except JSONDecodeError as error:
+    except JSONDecodeError:
         return
+    
     if not alist_leisure_strm_create:
-        pass
-    if 'preserve_parent_directory' not in alist_leisure_strm_create:
-        alist_leisure_strm_create['preserve_parent_directory'] = 'False'
-    if 'keep_original_file_name' not in alist_leisure_strm_create:
-        alist_leisure_strm_create['keep_original_file_name'] = 'False'
-    if 'refresh_dir' not in alist_leisure_strm_create:
-        alist_leisure_strm_create['refresh_dir'] = 'True'
-    if 'series_name' not in alist_leisure_strm_create:
-        alist_leisure_strm_create['series_name'] = task['taskname']
-    if 'season_num' not in alist_leisure_strm_create:
-        alist_leisure_strm_create['season_num'] = '2'
-    if 'create_nfo' not in alist_leisure_strm_create:
-        alist_leisure_strm_create['create_nfo'] = 'True'
-    if 'url' not in alist_leisure_strm_create:
-        alist_leisure_strm_create['url'] = '/quark' + task['savepath']
-    # 两分钟后再调用接口
+        return
+        
+    # 设置默认配置
+    default_configs = {
+        'preserve_parent_directory': 'False',
+        'keep_original_file_name': 'False', 
+        'refresh_dir': 'True',
+        'series_name': task['taskname'],
+        'season_num': '2',
+        'create_nfo': 'True',
+        'url': '/quark' + task['savepath']
+    }
+    
+    for key, default_value in default_configs.items():
+        if key not in alist_leisure_strm_create:
+            alist_leisure_strm_create[key] = default_value
+    
+    # 调用接口
     requests.get(url=CONFIG_DATA.get('leisure_strm_create'), params=alist_leisure_strm_create)
 
 
@@ -433,7 +487,7 @@ class Quark:
             "fr": "pc",
             "uc_param_str": "",
             "app": "clouddrive",
-            "__dt": int(random.uniform(1, 5) * 60 * 1000),
+            "__dt": int(random.uniform(RANDOM_DELAY_MIN, RANDOM_DELAY_MAX) * 60 * 1000),
             "__t": datetime.now().timestamp(),
         }
         payload = {
@@ -476,7 +530,7 @@ class Quark:
         return response
 
     def delete(self, filelist):
-        url = "{self.BASE_URL}/1/clouddrive/file/delete"
+        url = f"{self.BASE_URL}/1/clouddrive/file/delete"
         querystring = {"pr": "ucpro", "fr": "pc", "uc_param_str": ""}
         payload = {"action_type": 2, "filelist": filelist, "exclude_fids": []}
         headers = self.common_headers()
@@ -649,16 +703,17 @@ class Quark:
 
         # 需保存的文件清单
         need_save_list = []
-        reg_arr = []
         # 添加符合的
         for share_file in share_file_list:
             share_file_fid = share_file['fid']
             if share_file["dir"] and task.get("update_subdir", False):
                 pattern, replace = task["update_subdir"], ""
+                apply_rules_needed = False  # 子目录不需要额外规则
             else:
-                pattern, replace, reg_arr = magic_regex_func(
+                pattern, replace = magic_regex_func(
                     task["pattern"], task["replace"], task["taskname"]
                 )
+                apply_rules_needed = True
             # 正则文件名匹配
             if re.search(pattern, share_file["file_name"]):
                 # 替换后的文件名
@@ -667,9 +722,9 @@ class Quark:
                     if replace != ""
                     else share_file["file_name"]
                 )
-                for reg in reg_arr:
-                    if re.search(reg['pattern'], save_name):
-                        save_name = re.sub(reg['pattern'], reg['repl'], save_name)
+                # 应用额外的正则规则（仅对非子目录文件）
+                if apply_rules_needed:
+                    save_name = apply_filename_rules(save_name)
                 # 忽略后缀
                 if task.get("ignore_extension") and not share_file["dir"]:
                     compare_func = lambda a, b1, b2: (
@@ -754,7 +809,7 @@ class Quark:
                 "uc_param_str": "",
                 "task_id": task_id,
                 "retry_index": retry_index,
-                "__dt": int(random.uniform(1, 5) * 60 * 1000),
+                "__dt": int(random.uniform(RANDOM_DELAY_MIN, RANDOM_DELAY_MAX) * 60 * 1000),
                 "__t": datetime.now().timestamp(),
             }
             headers = self.common_headers()
@@ -777,10 +832,10 @@ class Quark:
         return response
 
     def do_rename_task(self, task, subdir_path=""):
-        pattern, replace, reg_arr = magic_regex_func(
+        pattern, replace = magic_regex_func(
             task["pattern"], task["replace"], task["taskname"]
         )
-        if (not pattern or not replace) and not reg_arr:
+        if not pattern or not replace:
             return 0
         savepath = re.sub(r"/{2,}", "/", f"/{task['savepath']}{subdir_path}")
         if not self.savepath_fid.get(savepath):
@@ -801,9 +856,8 @@ class Quark:
                     if replace != ""
                     else dir_file["file_name"]
                 )
-                for reg in reg_arr:
-                    if re.search(reg['pattern'], save_name):
-                        save_name = re.sub(reg['pattern'], reg['repl'], save_name)
+                # 应用额外的正则规则（使用新的统一函数）
+                save_name = apply_filename_rules(save_name)
                 # logging.info(f'save_name: {save_name}, dir_file_name: {dir_file["file_name"]}')
                 if save_name != dir_file["file_name"] and (
                         save_name not in dir_file_name_list
