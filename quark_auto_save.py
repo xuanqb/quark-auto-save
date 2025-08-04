@@ -52,30 +52,30 @@ MAGIC_REGEX = {
 FILENAME_RULES = [
     {
         'name': 'remove_parentheses',
-        'pattern': re.compile(r'（([上下])）'), 
+        'pattern': re.compile(r'（([上下])）'),
         'replace': r'\1',
         'desc': '将（上）（下）替换为上下'
     },
     {
         'name': 'remove_episode_prefix',
-        'pattern': re.compile(r'^第((\d{8})([\s\S]*)*)'), 
+        'pattern': re.compile(r'^第((\d{8})([\s\S]*)*)'),
         'replace': r'\1',
         'desc': '去掉"第"字前缀'
     },
     {
         'name': 'format_single_digit_date',
-        'pattern': re.compile(r'(\d{4})\.(\d{1,2})\.(\d{1,2})'), 
+        'pattern': re.compile(r'(\d{4})\.(\d{1,2})\.(\d{1,2})'),
         'replace': 'lambda',
         'desc': '格式化单位数日期：2025.4.4 → 20250404'
     },
     {
         'name': 'format_date_with_dots',
-        'pattern': re.compile(r'(\d{4})\.(\d{2})\.(\d{2})'), 
+        'pattern': re.compile(r'(\d{4})\.(\d{2})\.(\d{2})'),
         'replace': r'\1\2\3',
         'desc': '格式化日期：2024.06.08 → 20240608'
     },
     {
-        'name': 'convert_future_year', 
+        'name': 'convert_future_year',
         'pattern': re.compile(r'^(20(?:2[6-9]|[3-9]\d))(\d{4})(?=\D|$)'),
         'replace': 'current_year',
         'desc': '将未来年份转换为当前年份'
@@ -83,7 +83,7 @@ FILENAME_RULES = [
     {
         'name': 'add_year_prefix',
         'pattern': re.compile(r'^(\d{4})(?=\D)'),
-        'replace': 'add_current_year', 
+        'replace': 'add_current_year',
         'desc': '给4位数字加年份前缀'
     }
 ]
@@ -93,14 +93,14 @@ def apply_filename_rules(filename):
     """应用文件名规则，逐个处理"""
     result = filename
     current_year = datetime.now().year
-    
+
     for rule in FILENAME_RULES:
         pattern = rule['pattern']  # 直接使用预编译的正则
         if not pattern.search(result):
             continue
-            
+
         replace_type = rule['replace']
-        
+
         # 根据替换类型执行不同逻辑
         if replace_type == 'lambda':
             result = pattern.sub(lambda m: f"{m.group(1)}{int(m.group(2)):02d}{int(m.group(3)):02d}", result)
@@ -111,7 +111,7 @@ def apply_filename_rules(filename):
         else:
             # 普通字符串替换
             result = pattern.sub(replace_type, result)
-    
+
     return result
 
 
@@ -135,11 +135,11 @@ def magic_regex_func(pattern, replace, taskname=""):
         pattern = magic_config["pattern"]
         if replace == "":
             replace = magic_config["replace"]
-    
+
     # 处理任务名称占位符
     if taskname and "$TASKNAME" in replace:
         replace = replace.replace("$TASKNAME", taskname)
-    
+
     # 返回处理结果
     return pattern, replace
 
@@ -196,25 +196,25 @@ def update_alist(task):
         alist_leisure_strm_create = json.loads(task['alist_leisure_strm_create'])
     except JSONDecodeError:
         return
-    
+
     if not alist_leisure_strm_create:
         return
-        
+
     # 设置默认配置
     default_configs = {
         'preserve_parent_directory': 'False',
-        'keep_original_file_name': 'False', 
+        'keep_original_file_name': 'False',
         'refresh_dir': 'True',
         'series_name': task['taskname'],
         'season_num': '2',
         'create_nfo': 'True',
         'url': '/quark' + task['savepath']
     }
-    
+
     for key, default_value in default_configs.items():
         if key not in alist_leisure_strm_create:
             alist_leisure_strm_create[key] = default_value
-    
+
     # 调用接口
     requests.get(url=CONFIG_DATA.get('leisure_strm_create'), params=alist_leisure_strm_create)
 
@@ -623,7 +623,7 @@ class Quark:
                     item["fid"]
                     for item in dir_file_list
                     if (item["file_name"] in file_name_list)
-                    and ((datetime.now().timestamp() - item["created_at"]) < 60)
+                       and ((datetime.now().timestamp() - item["created_at"]) < 60)
                 ]
                 if del_list:
                     self.delete(del_list)
@@ -832,11 +832,6 @@ class Quark:
         return response
 
     def do_rename_task(self, task, subdir_path=""):
-        pattern, replace = magic_regex_func(
-            task["pattern"], task["replace"], task["taskname"]
-        )
-        if not pattern or not replace:
-            return 0
         savepath = re.sub(r"/{2,}", "/", f"/{task['savepath']}{subdir_path}")
         if not self.savepath_fid.get(savepath):
             self.savepath_fid[savepath] = self.get_fids([savepath])[0]["fid"]
@@ -850,26 +845,21 @@ class Quark:
                 is_rename_count += self.do_rename_task(
                     task, f"{subdir_path}/{dir_file['file_name']}"
                 )
-            if re.search(pattern, dir_file["file_name"]):
-                save_name = (
-                    re.sub(pattern, replace, dir_file["file_name"])
-                    if replace != ""
-                    else dir_file["file_name"]
-                )
-                # 应用额外的正则规则（使用新的统一函数）
-                save_name = apply_filename_rules(save_name)
-                # logging.info(f'save_name: {save_name}, dir_file_name: {dir_file["file_name"]}')
-                if save_name != dir_file["file_name"] and (
-                        save_name not in dir_file_name_list
-                ):
-                    logging.info(f"重命名：{dir_file['file_name']} → {save_name}")
-                    rename_return = self.rename(dir_file["fid"], save_name)
-                    if rename_return["code"] == 0:
-                        is_rename_count += 1
-                    else:
-                        logging.info(
-                            f"重命名：{dir_file['file_name']} → {save_name} 失败，{rename_return['message']}"
-                        )
+            # 应用额外的正则规则（使用新的统一函数）
+            save_name = dir_file["file_name"]
+            save_name = apply_filename_rules(save_name)
+            # logging.info(f'save_name: {save_name}, dir_file_name: {dir_file["file_name"]}')
+            if save_name != dir_file["file_name"] and (
+                    save_name not in dir_file_name_list
+            ):
+                logging.info(f"重命名：{dir_file['file_name']} → {save_name}")
+                rename_return = self.rename(dir_file["fid"], save_name)
+                if rename_return["code"] == 0:
+                    is_rename_count += 1
+                else:
+                    logging.info(
+                        f"重命名：{dir_file['file_name']} → {save_name} 失败，{rename_return['message']}"
+                    )
         return is_rename_count > 0
 
 
