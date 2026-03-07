@@ -574,7 +574,7 @@
           console.log(this.savepaths)
           axios.get('/get_savepath', { params: params })
             .then(response => {
-              this.savepaths = response.data
+              this.savepaths = response.data.data.list
               console.log(this.savepaths)
             })
             .catch(error => {
