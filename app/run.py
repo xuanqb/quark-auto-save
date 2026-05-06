@@ -23,7 +23,7 @@ import os
 
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, parent_dir)
-from quark_auto_save import Quark
+from quark_auto_save import Quark, normalize_config_data
 
 
 def get_app_ver():
@@ -73,11 +73,12 @@ def gen_md5(string):
 def read_json():
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
-    return data
+    return normalize_config_data(data)
 
 
 # 将数据写入 JSON 文件
 def write_json(data):
+    data = normalize_config_data(data, strict=True)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False, sort_keys=False)
 
@@ -156,6 +157,10 @@ def update():
     data = read_json()
     webui = data["webui"]
     data = request.json
+    try:
+        data = normalize_config_data(data, strict=True)
+    except ValueError as e:
+        return str(e), 400
     data["webui"] = webui
     write_json(data)
     # 重新加载任务

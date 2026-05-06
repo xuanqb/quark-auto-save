@@ -115,6 +115,155 @@ def apply_filename_rules(filename):
     return result
 
 
+def _normalize_suffix(value):
+    if not isinstance(value, str):
+        return ""
+    value = value.strip().lower()
+    if not value:
+        return ""
+    if not value.startswith("."):
+        value = f".{value}"
+    if value == ".":
+        return ""
+    return value
+
+
+def normalize_suffix_rules(rules, strict=False, path="suffix_rules"):
+    if rules is None:
+        return []
+    if not isinstance(rules, list):
+        if strict:
+            raise ValueError(f"{path} 必须是数组")
+        return []
+
+    normalized_rules = []
+    for index, rule in enumerate(rules):
+        rule_path = f"{path}[{index}]"
+        if not isinstance(rule, dict):
+            if strict:
+                raise ValueError(f"{rule_path} 必须是对象")
+            continue
+
+        raw_from = rule.get("from", "")
+        raw_to = rule.get("to", "")
+        if isinstance(raw_from, str):
+            raw_from = raw_from.strip()
+        if isinstance(raw_to, str):
+            raw_to = raw_to.strip()
+
+        if raw_from == "" and raw_to == "":
+            continue
+
+        if not isinstance(raw_from, str) or not isinstance(raw_to, str):
+            if strict:
+                raise ValueError(f"{rule_path} 的 from 和 to 必须是字符串")
+            continue
+
+        if raw_from == "" or raw_to == "":
+            if strict:
+                raise ValueError(f"{rule_path} 的 from 和 to 不能为空")
+            continue
+
+        suffix_from = _normalize_suffix(raw_from)
+        suffix_to = _normalize_suffix(raw_to)
+        if not suffix_from or not suffix_to:
+            if strict:
+                raise ValueError(f"{rule_path} 的 from 和 to 必须是有效后缀")
+            continue
+
+        normalized_rules.append({"from": suffix_from, "to": suffix_to})
+
+    return normalized_rules
+
+
+def normalize_config_data(config_data, strict=False):
+    if not isinstance(config_data, dict):
+        raise ValueError("配置必须是对象")
+
+    config_data["suffix_rules"] = normalize_suffix_rules(
+        config_data.get("suffix_rules", []),
+        strict=strict,
+        path="suffix_rules",
+    )
+
+    tasklist = config_data.get("tasklist", [])
+    if not isinstance(tasklist, list):
+        if strict:
+            raise ValueError("tasklist 必须是数组")
+        tasklist = []
+    config_data["tasklist"] = tasklist
+
+    for index, task in enumerate(tasklist):
+        if not isinstance(task, dict):
+            if strict:
+                raise ValueError(f"tasklist[{index}] 必须是对象")
+            continue
+        task["enable_suffix_replacement"] = bool(
+            task.get("enable_suffix_replacement", False)
+        )
+        task["suffix_rules"] = normalize_suffix_rules(
+            task.get("suffix_rules", []),
+            strict=strict,
+            path=f"tasklist[{index}].suffix_rules",
+        )
+
+    return config_data
+
+
+def get_effective_suffix_rules(task):
+    if not task.get("enable_suffix_replacement"):
+        return []
+
+    ordered_suffixes = []
+    merged_rules = {}
+    for rule in CONFIG_DATA.get("suffix_rules", []):
+        suffix_from = rule["from"]
+        if suffix_from not in ordered_suffixes:
+            ordered_suffixes.append(suffix_from)
+        merged_rules[suffix_from] = rule
+
+    for rule in task.get("suffix_rules", []):
+        suffix_from = rule["from"]
+        if suffix_from not in ordered_suffixes:
+            ordered_suffixes.append(suffix_from)
+        merged_rules[suffix_from] = rule
+
+    return [merged_rules[suffix_from] for suffix_from in ordered_suffixes]
+
+
+def apply_suffix_rules(filename, rules):
+    if not rules:
+        return filename
+
+    filename_lower = filename.lower()
+    sorted_rules = sorted(rules, key=lambda item: len(item["from"]), reverse=True)
+    for rule in sorted_rules:
+        suffix_from = rule["from"]
+        if filename_lower.endswith(suffix_from):
+            return f"{filename[:-len(suffix_from)]}{rule['to']}"
+    return filename
+
+
+def build_target_name(task, source_name, is_dir=False, subdir_mode=False):
+    if subdir_mode:
+        return source_name
+
+    pattern, replace = magic_regex_func(
+        task.get("pattern", ""),
+        task.get("replace", ""),
+        task.get("taskname", ""),
+    )
+
+    save_name = source_name
+    if re.search(pattern, source_name):
+        save_name = re.sub(pattern, replace, source_name) if replace != "" else source_name
+
+    save_name = apply_filename_rules(save_name)
+    if not is_dir:
+        save_name = apply_suffix_rules(save_name, get_effective_suffix_rules(task))
+    return save_name
+
+
 def magic_regex_func(pattern, replace, taskname=""):
     """
     魔法正则匹配函数 - 重构后版本，提高可读性和性能
@@ -705,26 +854,25 @@ class Quark:
         need_save_list = []
         # 添加符合的
         for share_file in share_file_list:
-            share_file_fid = share_file['fid']
             if share_file["dir"] and task.get("update_subdir", False):
                 pattern, replace = task["update_subdir"], ""
-                apply_rules_needed = False  # 子目录不需要额外规则
+                save_name = build_target_name(
+                    task,
+                    share_file["file_name"],
+                    is_dir=True,
+                    subdir_mode=True,
+                )
             else:
                 pattern, replace = magic_regex_func(
                     task["pattern"], task["replace"], task["taskname"]
                 )
-                apply_rules_needed = True
+                save_name = build_target_name(
+                    task,
+                    share_file["file_name"],
+                    is_dir=share_file["dir"],
+                )
             # 正则文件名匹配
             if re.search(pattern, share_file["file_name"]):
-                # 替换后的文件名
-                save_name = (
-                    re.sub(pattern, replace, share_file["file_name"])
-                    if replace != ""
-                    else share_file["file_name"]
-                )
-                # 应用额外的正则规则（仅对非子目录文件）
-                if apply_rules_needed:
-                    save_name = apply_filename_rules(save_name)
                 # 忽略后缀
                 if task.get("ignore_extension") and not share_file["dir"]:
                     compare_func = lambda a, b1, b2: (
@@ -845,9 +993,11 @@ class Quark:
                 is_rename_count += self.do_rename_task(
                     task, f"{subdir_path}/{dir_file['file_name']}"
                 )
-            # 应用额外的正则规则（使用新的统一函数）
-            save_name = dir_file["file_name"]
-            save_name = apply_filename_rules(save_name)
+            save_name = build_target_name(
+                task,
+                dir_file["file_name"],
+                is_dir=dir_file["dir"],
+            )
             # logging.info(f'save_name: {save_name}, dir_file_name: {dir_file["file_name"]}')
             if save_name != dir_file["file_name"] and (
                     save_name not in dir_file_name_list
@@ -1033,6 +1183,13 @@ def do_save(account, tasklist=[]):
                 logging.info(f"刷媒体库: {task['emby_id']}")
             if task.get("ignore_extension"):
                 logging.info(f"忽略后缀: {task['ignore_extension']}")
+            logging.info(
+                f"后缀替换: {'开启' if task.get('enable_suffix_replacement') else '关闭'}"
+            )
+            if task.get("enable_suffix_replacement"):
+                logging.info(
+                    f"生效后缀规则: {json.dumps(get_effective_suffix_rules(task), ensure_ascii=False)}"
+                )
             if task.get("update_subdir"):
                 logging.info(f"更子目录: {task['update_subdir']}")
             logging.info('')
@@ -1086,6 +1243,7 @@ def main():
         cookie_val = CONFIG_DATA.get("cookie")
         if not CONFIG_DATA.get("magic_regex"):
             CONFIG_DATA["magic_regex"] = MAGIC_REGEX
+        CONFIG_DATA = normalize_config_data(CONFIG_DATA)
         cookie_form_file = True
     # 获取cookie
     cookies = get_cookies(cookie_val)

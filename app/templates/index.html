@@ -112,6 +112,29 @@
 
       <div class="row title">
         <div class="col">
+          <h2>全局后缀替换</h2>
+        </div>
+        <div class="col text-right">
+          <button type="button" class="btn btn-outline-primary mb-3" @click="addSuffixRule(formData.suffix_rules)">+</button>
+        </div>
+      </div>
+      <p>配置默认后缀替换规则。任务开启后缀替换后，将先使用这里的规则，再由任务自己的同源规则覆盖。</p>
+      <div v-for="(rule, ruleIndex) in formData.suffix_rules" :key="`global_suffix_${ruleIndex}`" class="input-group mb-2">
+        <div class="input-group-prepend">
+          <span class="input-group-text">源后缀</span>
+        </div>
+        <input type="text" v-model="rule.from" class="form-control" placeholder=".7z">
+        <div class="input-group-prepend">
+          <span class="input-group-text">目标后缀</span>
+        </div>
+        <input type="text" v-model="rule.to" class="form-control" placeholder=".mp4">
+        <div class="input-group-append">
+          <button type="button" class="btn btn-outline-danger" @click="removeSuffixRule(formData.suffix_rules, ruleIndex)">-</button>
+        </div>
+      </div>
+
+      <div class="row title">
+        <div class="col">
           <h2>任务列表</h2>
         </div>
       </div>
@@ -221,6 +244,30 @@
                 <datalist id="magicRegex">
                   <option v-for="(value, key) in formData.magic_regex" :key="key" :value="`${key}`" v-html="`${value.pattern} → ${value.replace}`"></option>
                 </datalist>
+              </div>
+            </div>
+            <div class="form-group row">
+              <label class="col-sm-2 col-form-label">后缀替换</label>
+              <div class="col-sm-10">
+                <div class="form-check mb-2">
+                  <input class="form-check-input" type="checkbox" v-model="task.enable_suffix_replacement" :id="`suffix_replace_${index}`">
+                  <label class="form-check-label" :for="`suffix_replace_${index}`">启用后缀替换</label>
+                </div>
+                <small class="form-text text-muted mb-2">开启且任务规则留空时仅使用全局规则；填写同源后缀时覆盖全局。</small>
+                <div v-for="(rule, ruleIndex) in task.suffix_rules" :key="`task_suffix_${index}_${ruleIndex}`" class="input-group mb-2">
+                  <div class="input-group-prepend">
+                    <span class="input-group-text">源后缀</span>
+                  </div>
+                  <input type="text" v-model="rule.from" class="form-control" placeholder=".mkv">
+                  <div class="input-group-prepend">
+                    <span class="input-group-text">目标后缀</span>
+                  </div>
+                  <input type="text" v-model="rule.to" class="form-control" placeholder=".mp4">
+                  <div class="input-group-append">
+                    <button type="button" class="btn btn-outline-danger" @click="removeSuffixRule(task.suffix_rules, ruleIndex)">-</button>
+                  </div>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-primary" @click="addSuffixRule(task.suffix_rules)">增加任务规则</button>
               </div>
             </div>
             <div class="form-group row">
@@ -375,6 +422,7 @@
             url: "",
             apikey: ""
           },
+          suffix_rules: [],
           tasklist: [],
           magic_regex: {}
         },
@@ -387,6 +435,8 @@
           enddate: "",
           emby_id: "",
           ignore_extension: false,
+          enable_suffix_replacement: false,
+          suffix_rules: [],
           runweek: [1, 2, 3, 4, 5, 6, 7]
         },
         run_log: "",
@@ -434,6 +484,30 @@
         $('[data-toggle="tooltip"]').tooltip()
       },
       methods: {
+        normalizeTask(task) {
+          if (!task.hasOwnProperty('runweek')) {
+            task.runweek = [1, 2, 3, 4, 5, 6, 7];
+          }
+          if (!task.hasOwnProperty('enable_suffix_replacement')) {
+            task.enable_suffix_replacement = false;
+          }
+          if (!Array.isArray(task.suffix_rules)) {
+            task.suffix_rules = [];
+          }
+          return task;
+        },
+        addSuffixRule(target) {
+          if (!Array.isArray(target)) {
+            return;
+          }
+          target.push({ from: "", to: "" });
+        },
+        removeSuffixRule(target, index) {
+          if (!Array.isArray(target)) {
+            return;
+          }
+          target.splice(index, 1);
+        },
         checkNewVersion() {
           this.versionTips = this.version;
           axios.get('https://api.github.com/repos/Cp0204/quark-auto-save/tags')
@@ -454,17 +528,20 @@
               // cookie兼容
               if (typeof response.data.cookie === 'string')
                 response.data.cookie = [response.data.cookie];
-              // 添加星期预设
-              response.data.tasklist = response.data.tasklist.map(task => {
-                if (!task.hasOwnProperty('runweek')) {
-                  task.runweek = [1, 2, 3, 4, 5, 6, 7];
-                }
-                return task;
-              });
+              if (!Array.isArray(response.data.tasklist)) {
+                response.data.tasklist = [];
+              }
               // 添加emby预设
               if (!response.data.hasOwnProperty('emby')) {
-                response.data.emby = { ...this.emby };
+                response.data.emby = {
+                  url: "",
+                  apikey: ""
+                };
               }
+              if (!Array.isArray(response.data.suffix_rules)) {
+                response.data.suffix_rules = [];
+              }
+              response.data.tasklist = response.data.tasklist.map(task => this.normalizeTask(task));
               // 获取所有任务父目录
               response.data.tasklist.forEach(item => {
                 parentDir = this.getParentDirectory(item.savepath)
@@ -484,6 +561,7 @@
               console.log('Config saved successfully:', response.data);
             })
             .catch(error => {
+              alert(error.response && error.response.data ? error.response.data : '配置保存失败');
               console.error('Error saving config:', error);
             });
         },
@@ -504,9 +582,11 @@
             this.$delete(this.formData.push_config, key);
         },
         addTask() {
-          newTask = { ...this.newTask }
+          const newTask = { ...this.newTask }
+          newTask.runweek = [...this.newTask.runweek]
+          newTask.suffix_rules = []
           newTask.taskname = this.taskNameFilter
-          lastTask = this.formData.tasklist[this.formData.tasklist.length - 1]
+          const lastTask = this.formData.tasklist[this.formData.tasklist.length - 1]
           if (this.formData.tasklist.length > 0 && lastTask.taskname) {
             newTask.savepath = lastTask.savepath.replace(lastTask.taskname, 'newTask')
           } else {
