@@ -64,9 +64,9 @@ FILENAME_RULES = [
     },
     {
         'name': 'format_single_digit_date',
-        'pattern': re.compile(r'(\d{4})\.(\d{1,2})\.(\d{1,2})'),
+        'pattern': re.compile(r'(\d{4})[.-](\d{1,2})[.-](\d{1,2})'),
         'replace': 'lambda',
-        'desc': '格式化单位数日期：2025.4.4 → 20250404'
+        'desc': '格式化日期：2025.4.4 或 2025-04-04 → 20250404'
     },
     {
         'name': 'format_date_with_dots',
