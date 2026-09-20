@@ -1,4 +1,6 @@
 quark_config_debug.json
+quark_config.json
+app/config/quark_config.json
 __pycache__
 /config
 .idea
